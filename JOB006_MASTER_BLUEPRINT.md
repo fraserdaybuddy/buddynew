@@ -1,6 +1,6 @@
 # JOB-006 Master Blueprint
 ## Sports Betting Model — Complete Agent-Ready Specification
-**Version:** 1.4 | **Status:** STAGE 1 COMPLETE — Stage 2 Next | **Date:** 2026-03-08
+**Version:** 1.5 | **Status:** STAGE 1 COMPLETE — Darts scraper ready to run | **Date:** 2026-03-09
 
 ---
 
@@ -12,6 +12,7 @@
 | 1.2 | 2026-03-08 | Added Sportmarket API, Telegram workflow, multi-sport framing |
 | 1.3 | 2026-03-08 | Added tennis. Replaced urllib with Crawl4AI. Stage 1 built and tested. |
 | 1.4 | 2026-03-08 | **Full metric set per sport. Corrected tennis thesis (duration not style). Outlier-robust form builder (trimmed mean, 7-match window). Fractional Kelly confidence-tiered staking replacing fixed % model.** |
+| 1.5 | 2026-03-09 | **Data source archaeology complete. dartsdatabase.py DEPRECATED (no per-match 180s). darts24.com confirmed as primary darts source — provides 180s, 3-dart avg, 140+, 100+, checkout %, highest checkout per match. New darts24.py scraper built and tested. 16 major tournaments (2024+2025) mapped.** |
 
 ---
 
@@ -94,7 +95,7 @@ Golf (field event), Cricket/Football (team format)
 
 | Sport | Primary Data Source | Cost | Notes |
 |-------|--------------------|----|-------|
-| Darts | DartsDatabase.co.uk | Free | Best 180s-per-match data |
+| Darts | darts24.com (FlashScore) | Free | **PRIMARY** — per-match 180s, avg, 140+, 100+, checkout %. dartsdatabase.co.uk REJECTED (no per-match 180s). |
 | Snooker | CueTracker.net | Free | Centuries + break data |
 | Tennis | github.com/JeffSackmann/tennis_atp | Free | CSV back to 1968, aces columns included |
 | Odds | Betfair Historical Data API | User has access | Canonical closing prices |
@@ -184,16 +185,26 @@ Or ALL / NONE / ALL H
   ✓ src/database.py    — full SQLite schema, init, backup, hard gate queries
   ✓ src/resolver.py    — player identity resolution with confidence tiers
   ✓ src/config.py      — sport config registry (darts / snooker / tennis)
-  ✓ src/scrapers/darts/dartsdatabase.py
+  ✓ src/scrapers/darts/darts24.py       — PRIMARY darts scraper (darts24.com, 180s confirmed)
+  ✗ src/scrapers/darts/dartsdatabase.py — DEPRECATED (no per-match 180s, wrong source)
   ✓ src/scrapers/snooker/cuetrackeR.py
-  ✓ src/scrapers/tennis/sackmann.py
+  ✓ src/scrapers/tennis/sackmann.py     — COMPLETE, 5632 ATP matches in DB
 
+[COMPLETE] Stage 1b: Data source archaeology (2026-03-09)
+  ✓ dartsdatabase.co.uk — investigated, REJECTED (tournament-level only, no per-match 180s)
+  ✓ PDC API — investigated, provides match results + player data, NO 180s (Sportradar locked)
+  ✓ darts24.com — CONFIRMED primary source
+      URL: /match/{p1-slug}/{p2-slug}/summary/stats/?mid={id}
+      Stats: 3-dart avg, 180s, 140+, 100+, checkout % (hits/att), highest checkout
+      Coverage: 2017+, all PDC majors, 16 tournaments mapped for 2024+2025
+
+[READY]   Run darts24.py to populate DB — 16 majors × ~100-160 matches each
 [NEXT]    Stage 2: Sportmarket adapter (execution layer)
 [PENDING] Stage 3: Poisson model + calibration runner
 [PENDING] Stage 4: Report generator + Telegram formatter
 [PENDING] Stage 5: Reply parser + approval router
 [PENDING] Stage 6: Settlement tracker
-[PENDING] Stage 7: Crawl4AI upgrade (replaces urllib scrapers)
+[COMPLETE] Stage 7: Crawl4AI upgrade — darts24.py uses Crawl4AI + BeautifulSoup
 ```
 
 ---

@@ -1,4 +1,9 @@
 """
+*** DEPRECATED — 2026-03-09 ***
+dartsdatabase.co.uk does NOT provide per-match 180s data.
+Event pages only show match scores and 3-dart averages.
+PRIMARY darts scraper is now: src/scrapers/darts/darts24.py (darts24.com)
+
 scrapers/darts/dartsdatabase.py — Darts historical data scraper
 JOB-006 Sports Betting Model
 
