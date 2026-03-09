@@ -97,7 +97,7 @@ def ensure_staging(conn: sqlite3.Connection) -> None:
 # ─────────────────────────────────────────────
 
 async def _fetch_rendered(url: str, wait_ms: int = 3000) -> Optional[str]:
-    """Fetch a JS-rendered page. Returns HTML string or None."""
+    """Fetch a JS-rendered page with a fresh browser. Returns HTML or None."""
     try:
         async with AsyncWebCrawler(verbose=False) as crawler:
             config = CrawlerRunConfig(
@@ -113,7 +113,109 @@ async def _fetch_rendered(url: str, wait_ms: int = 3000) -> Optional[str]:
 
 
 def fetch_rendered(url: str, wait_ms: int = 3000) -> Optional[str]:
+    """Single-shot fetch (used for testing). For bulk scraping use scrape_tournament."""
     return asyncio.run(_fetch_rendered(url, wait_ms))
+
+
+async def _scrape_tournament_async(
+    results_url: str,
+    tournament_name: str,
+    year: int,
+    db_path: Path,
+    delay: float,
+) -> dict:
+    """
+    Async core of scrape_tournament. Reuses a single browser session
+    across the results page + all match stats pages for a tournament.
+    """
+    from database import get_conn, backup
+    from resolver import Resolver, ResolutionFailed, ResolutionQueued
+
+    cfg_list = CrawlerRunConfig(wait_until='networkidle', page_timeout=20000,
+                                js_code="await new Promise(r => setTimeout(r, 3000));")
+    cfg_stats = CrawlerRunConfig(wait_until='networkidle', page_timeout=20000,
+                                 js_code="await new Promise(r => setTimeout(r, 3000));")
+
+    print(f"\n[darts24] Scraping: {tournament_name} {year}")
+    print(f"[darts24] URL: {results_url}")
+
+    async with AsyncWebCrawler(verbose=False) as crawler:
+        # Step 1: results page
+        r = await crawler.arun(results_url, config=cfg_list)
+        if not r.success:
+            print(f"[darts24] BLOCKED: {results_url}")
+            return {'scraped': 0, 'inserted': 0, 'failed': 0, 'blocked': 1}
+
+        matches = parse_match_list(r.html)
+        print(f"[darts24] Found {len(matches)} matches")
+        if not matches:
+            print(f"[darts24] WARNING: zero matches parsed")
+            return {'scraped': 0, 'inserted': 0, 'failed': 0, 'blocked': 0}
+
+        inserted = 0
+        failed = 0
+        blocked = 0
+
+        with get_conn(db_path) as conn:
+            ensure_staging(conn)
+
+        for i, m in enumerate(matches):
+            print(f"[darts24] {i+1}/{len(matches)}: {m['p1_raw_name']} vs {m['p2_raw_name']}", end=' ', flush=True)
+
+            stats_url = (
+                m['match_url'].rstrip('/').split('?')[0] +
+                'summary/stats/?' +
+                m['match_url'].split('?')[-1]
+            )
+
+            await asyncio.sleep(delay)
+            sr = await crawler.arun(stats_url, config=cfg_stats)
+            if not sr.success:
+                print("— BLOCKED")
+                blocked += 1
+                stats = {}
+            else:
+                stats = parse_match_stats(sr.html)
+                print(f"— avg={stats.get('p1_avg')}/{stats.get('p2_avg')} 180s={stats.get('p1_180s')}/{stats.get('p2_180s')}")
+
+            fmt = detect_format(tournament_name, m['round'])
+            try:
+                with get_conn(db_path) as conn:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO staging_darts
+                           (tournament_name, tournament_year, round, match_date,
+                            p1_raw_name, p2_raw_name, p1_score, p2_score,
+                            p1_180s, p2_180s, p1_avg, p2_avg,
+                            p1_140plus, p2_140plus, p1_100plus, p2_100plus,
+                            p1_checkout_pct, p2_checkout_pct,
+                            p1_checkout_hits, p2_checkout_hits,
+                            p1_checkout_att, p2_checkout_att,
+                            p1_highest_checkout, p2_highest_checkout,
+                            format, source_url, match_id_darts24)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            tournament_name, year, m['round'],
+                            datetime.now().strftime('%Y-%m-%d'),
+                            m['p1_raw_name'], m['p2_raw_name'],
+                            m.get('p1_score'), m.get('p2_score'),
+                            stats.get('p1_180s'), stats.get('p2_180s'),
+                            stats.get('p1_avg'), stats.get('p2_avg'),
+                            stats.get('p1_140plus'), stats.get('p2_140plus'),
+                            stats.get('p1_100plus'), stats.get('p2_100plus'),
+                            stats.get('p1_checkout_pct'), stats.get('p2_checkout_pct'),
+                            stats.get('p1_checkout_hits'), stats.get('p2_checkout_hits'),
+                            stats.get('p1_checkout_att'), stats.get('p2_checkout_att'),
+                            stats.get('p1_highest_checkout'), stats.get('p2_highest_checkout'),
+                            fmt, stats_url, m['mid'],
+                        )
+                    )
+                inserted += 1
+            except Exception as e:
+                print(f"[darts24] Insert error: {e}")
+                failed += 1
+
+    print(f"\n[darts24] Done. Staged: {inserted} | Blocked: {blocked} | Failed: {failed}")
+    return {'scraped': len(matches), 'inserted': inserted, 'failed': failed, 'blocked': blocked}
 
 
 # ─────────────────────────────────────────────
@@ -358,91 +460,12 @@ class Darts24Scraper:
     ) -> dict:
         """
         Scrape all matches from a tournament results page.
-        For each match, fetches the stats sub-page.
+        Reuses a single browser session across all match stats fetches.
         Returns summary: {scraped, inserted, failed, blocked}
         """
-        print(f"\n[darts24] Scraping: {tournament_name} {year}")
-        print(f"[darts24] URL: {results_url}")
-
-        # Step 1: get match list
-        html = fetch_rendered(results_url, wait_ms=3000)
-        if html is None:
-            print(f"[darts24] BLOCKED: could not fetch {results_url}")
-            return {'scraped': 0, 'inserted': 0, 'failed': 0, 'blocked': 1}
-
-        matches = parse_match_list(html)
-        print(f"[darts24] Found {len(matches)} matches on results page")
-
-        if not matches:
-            print(f"[darts24] WARNING: zero matches parsed — check URL or page structure")
-            return {'scraped': 0, 'inserted': 0, 'failed': 0, 'blocked': 0}
-
-        inserted = 0
-        failed = 0
-        blocked = 0
-
-        for i, m in enumerate(matches):
-            print(f"[darts24] Match {i+1}/{len(matches)}: {m['p1_raw_name']} vs {m['p2_raw_name']}", end=' ')
-
-            # Step 2: fetch stats for this match
-            stats_url = (
-                m['match_url'].rstrip('/')
-                .replace('/?mid=', '/summary/stats/?mid=')
-            )
-            # Polite delay
-            time.sleep(self.delay)
-
-            stats_html = fetch_rendered(stats_url, wait_ms=3000)
-            if stats_html is None:
-                print(f"— BLOCKED")
-                blocked += 1
-                stats = {}
-            else:
-                stats = parse_match_stats(stats_html)
-                print(f"— avg={stats.get('p1_avg')}/{stats.get('p2_avg')} 180s={stats.get('p1_180s')}/{stats.get('p2_180s')}")
-
-            fmt = detect_format(tournament_name, m['round'])
-
-            try:
-                with get_conn(self.db_path) as conn:
-                    conn.execute(
-                        """INSERT OR IGNORE INTO staging_darts
-                           (tournament_name, tournament_year, round, match_date,
-                            p1_raw_name, p2_raw_name,
-                            p1_score, p2_score,
-                            p1_180s, p2_180s,
-                            p1_avg, p2_avg,
-                            p1_140plus, p2_140plus,
-                            p1_100plus, p2_100plus,
-                            p1_checkout_pct, p2_checkout_pct,
-                            p1_checkout_hits, p2_checkout_hits,
-                            p1_checkout_att, p2_checkout_att,
-                            p1_highest_checkout, p2_highest_checkout,
-                            format, source_url, match_id_darts24)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (
-                            tournament_name, year, m['round'],
-                            datetime.now().strftime('%Y-%m-%d'),
-                            m['p1_raw_name'], m['p2_raw_name'],
-                            m.get('p1_score'), m.get('p2_score'),
-                            stats.get('p1_180s'), stats.get('p2_180s'),
-                            stats.get('p1_avg'), stats.get('p2_avg'),
-                            stats.get('p1_140plus'), stats.get('p2_140plus'),
-                            stats.get('p1_100plus'), stats.get('p2_100plus'),
-                            stats.get('p1_checkout_pct'), stats.get('p2_checkout_pct'),
-                            stats.get('p1_checkout_hits'), stats.get('p2_checkout_hits'),
-                            stats.get('p1_checkout_att'), stats.get('p2_checkout_att'),
-                            stats.get('p1_highest_checkout'), stats.get('p2_highest_checkout'),
-                            fmt, stats_url, m['mid'],
-                        )
-                    )
-                inserted += 1
-            except Exception as e:
-                print(f"[darts24] Insert error: {e}")
-                failed += 1
-
-        print(f"\n[darts24] Done. Staged: {inserted} | Blocked: {blocked} | Failed: {failed}")
-        return {'scraped': len(matches), 'inserted': inserted, 'failed': failed, 'blocked': blocked}
+        return asyncio.run(_scrape_tournament_async(
+            results_url, tournament_name, year, self.db_path, self.delay
+        ))
 
     def promote_to_matches(self) -> dict:
         """Resolve player names and promote staged rows to matches table."""
