@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JOB006 — Betting Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --surface: #111113;
+    --border: #1e1e22;
+    --border-bright: #2e2e35;
+    --text: #e8e8e8;
+    --muted: #666670;
+    --accent: #00ff87;
+    --accent-dim: rgba(0,255,135,0.08);
+    --accent-mid: rgba(0,255,135,0.15);
+    --warn: #ff6b35;
+    --warn-dim: rgba(255,107,53,0.08);
+    --blue: #4488ff;
+    --blue-dim: rgba(68,136,255,0.08);
+    --yellow: #ffd166;
+    --red: #ff4466;
+    --paper: #ffd166;
+    --paper-dim: rgba(255,209,102,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; display: flex; height: 100vh; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 200px;
+    min-width: 200px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 0;
+  }
+
+  .logo {
+    padding: 0 20px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+
+  .logo-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .logo-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin-top: 3px;
+  }
+
+  .nav-section { padding: 0 12px; margin-bottom: 8px; }
+
+  .nav-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 0 8px;
+    margin-bottom: 4px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+    transition: all 0.15s;
+    font-size: 12px;
+    border: 1px solid transparent;
+  }
+
+  .nav-item:hover { color: var(--text); background: var(--border); }
+
+  .nav-item.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+    border-color: rgba(0,255,135,0.2);
+  }
+
+  .nav-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .nav-item.active .nav-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+  /* ── PAPER MODE TOGGLE ── */
+  .mode-toggle {
+    margin: 0 12px 16px;
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .mode-toggle-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 8px 10px 4px;
+  }
+
+  .mode-buttons {
+    display: flex;
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .mode-btn {
+    flex: 1;
+    padding: 6px 0;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    border-radius: 3px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .mode-btn.active-paper {
+    background: var(--paper-dim);
+    color: var(--paper);
+    border: 1px solid rgba(255,209,102,0.25);
+  }
+
+  .mode-btn.active-live {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(0,255,135,0.25);
+  }
+
+  .mode-indicator {
+    padding: 6px 10px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mode-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+  }
+
+  .mode-dot.paper { background: var(--paper); box-shadow: 0 0 5px var(--paper); }
+  .mode-dot.live  { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+
+  /* ── STATUS BAR ── */
+  .status-bar {
+    margin-top: auto;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+  }
+
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .status-sport {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .status-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .pill-green  { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,255,135,0.2); }
+  .pill-orange { background: var(--warn-dim);   color: var(--warn);   border: 1px solid rgba(255,107,53,0.2); }
+  .pill-blue   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(68,136,255,0.2); }
+  .pill-paper  { background: var(--paper-dim);  color: var(--paper);  border: 1px solid rgba(255,209,102,0.2); }
+
+  /* ── MAIN ── */
+  .main { flex: 1; overflow-y: auto; padding: 28px 32px; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 28px;
+  }
+
+  .page-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+
+  .page-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  .timestamp {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-align: right;
+  }
+
+  /* ── GRIDS ── */
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 24px; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 20px;
+  }
+
+  .card-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .card-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .card-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .card-accent  { border-color: rgba(0,255,135,0.25); }
+  .card-accent .card-value { color: var(--accent); }
+  .card-warn    { border-color: rgba(255,107,53,0.25); }
+  .card-red     { border-color: rgba(255,68,102,0.25); }
+  .card-paper   { border-color: rgba(255,209,102,0.25); }
+
+  /* ── TABLES ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+
+  table { width: 100%; border-collapse: collapse; }
+
+  th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 10px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  td {
+    padding: 11px 20px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  .edge-high { color: var(--accent); font-weight: 500; }
+  .edge-med  { color: var(--yellow); }
+  .edge-low  { color: var(--muted); }
+  .edge-neg  { color: var(--red); }
+
+  .sport-tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+
+  .tag-tennis  { background: var(--blue-dim);              color: var(--blue);   border: 1px solid rgba(68,136,255,0.2); }
+  .tag-darts   { background: var(--warn-dim);              color: var(--warn);   border: 1px solid rgba(255,107,53,0.2); }
+  .tag-snooker { background: rgba(255,209,102,0.08);       color: var(--yellow); border: 1px solid rgba(255,209,102,0.2); }
+
+  /* ── ANALYSER ── */
+  .analyser-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+
+  .input-group { margin-bottom: 14px; }
+
+  .input-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  .input-field {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    padding: 9px 12px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .input-field:focus { border-color: var(--accent); }
+  select.input-field { cursor: pointer; }
+
+  .btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 10px 20px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .btn-primary { background: var(--accent); color: #0a0a0b; width: 100%; margin-top: 8px; }
+  .btn-primary:hover { opacity: 0.85; }
+
+  .btn-confirm {
+    background: var(--accent);
+    color: #0a0a0b;
+    padding: 10px 24px;
+    border-radius: 4px;
+    border: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+
+  .btn-confirm:disabled {
+    background: var(--border-bright);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+
+  .btn-confirm:not(:disabled):hover { opacity: 0.85; }
+
+  /* ── RESULT CARD ── */
+  .result-card {
+    background: var(--bg);
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    padding: 20px;
+  }
+
+  .result-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .result-big {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 42px;
+    font-weight: 300;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .result-label { font-size: 11px; color: var(--muted); margin-bottom: 20px; }
+
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .result-row:last-child { border-bottom: none; }
+  .result-key { color: var(--muted); }
+  .result-val { font-family: 'IBM Plex Mono', monospace; }
+
+  /* ── SPARKLINE ── */
+  .sparkline { display: flex; align-items: flex-end; gap: 3px; height: 40px; }
+  .spark-bar {
+    flex: 1;
+    background: var(--border-bright);
+    border-radius: 2px 2px 0 0;
+    transition: background 0.2s;
+  }
+  .spark-bar.active { background: var(--accent); }
+  .spark-bar:hover  { background: var(--accent); opacity: 0.7; }
+
+  /* ── PROGRESS ── */
+  .progress-wrap { background: var(--border); border-radius: 2px; height: 4px; margin-top: 8px; }
+  .progress-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 1s ease; }
+  .progress-fill.orange { background: var(--warn); }
+  .progress-fill.blue   { background: var(--blue); }
+  .progress-fill.red    { background: var(--red); }
+
+  /* ── SECTION DIVIDER ── */
+  .section-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* ── KELLY RING ── */
+  .kelly-ring {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) 0% 23%, var(--border) 23% 100%);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+
+  .kelly-inner {
+    width: 60px; height: 60px;
+    background: var(--bg);
+    border-radius: 50%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+
+  .kelly-val { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: var(--accent); }
+  .kelly-label { font-size: 8px; color: var(--muted); letter-spacing: 0.05em; }
+
+  /* ── REC BOX ── */
+  .rec-box {
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,255,135,0.2);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .rec-icon { font-size: 20px; }
+  .rec-text { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .rec-text strong { color: var(--accent); font-family: 'IBM Plex Mono', monospace; }
+
+  /* ── PERFORMANCE PAGE ── */
+  .period-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    width: fit-content;
+  }
+
+  .period-tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 7px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .period-tab.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(0,255,135,0.2);
+  }
+
+  .period-tab:hover:not(.active) { color: var(--text); }
+
+  .chart-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .chart-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  canvas { display: block; width: 100%; }
+
+  .wl-bar-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .wl-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  .wl-label { width: 70px; color: var(--muted); text-align: right; }
+
+  .wl-bar-bg {
+    flex: 1;
+    height: 22px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .wl-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    transition: width 0.8s ease;
+    white-space: nowrap;
+  }
+
+  .wl-bar-fill.win  { background: rgba(0,255,135,0.2); color: var(--accent); }
+  .wl-bar-fill.loss { background: rgba(255,68,102,0.2); color: var(--red); }
+
+  .wl-count { width: 32px; text-align: right; color: var(--text); }
+
+  .stat-delta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    margin-top: 4px;
+  }
+
+  .delta-pos { color: var(--accent); }
+  .delta-neg { color: var(--red); }
+  .delta-neu { color: var(--muted); }
+
+  /* ── BACKTEST ── */
+  .bt-val { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 500; margin-bottom: 4px; }
+  .bt-label { font-size: 11px; color: var(--muted); }
+
+  .green  { color: var(--accent); }
+  .orange { color: var(--warn); }
+  .blue   { color: var(--blue); }
+  .yellow { color: var(--yellow); }
+  .red    { color: var(--red); }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+  /* ── LIVE DOT ── */
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .live-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  .paper-dot {
+    width: 6px; height: 6px;
+    background: var(--paper);
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+  }
+
+  /* ── PAPER MODE BANNER ── */
+  .paper-banner {
+    display: none;
+    background: var(--paper-dim);
+    border: 1px solid rgba(255,209,102,0.2);
+    border-radius: 4px;
+    padding: 8px 14px;
+    margin-bottom: 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--paper);
+    letter-spacing: 0.08em;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .paper-banner.show { display: flex; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .card, .table-wrap, .chart-wrap { animation: fadeUp 0.3s ease forwards; }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── SIDEBAR ── -->
+  <nav class="sidebar">
+    <div class="logo">
+      <div class="logo-title">JOB-006</div>
+      <div class="logo-sub">BETTING INTELLIGENCE</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Analysis</div>
+      <div class="nav-item active" onclick="showPage('dashboard', this)">
+        <div class="nav-dot"></div> Dashboard
+      </div>
+      <div class="nav-item" onclick="showPage('analyser', this)">
+        <div class="nav-dot"></div> Match Analyser
+      </div>
+      <div class="nav-item" onclick="showPage('backtest', this)">
+        <div class="nav-dot"></div> Backtest
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Tracking</div>
+      <div class="nav-item" onclick="showPage('performance', this)">
+        <div class="nav-dot"></div> Performance
+      </div>
+      <div class="nav-item" onclick="showPage('bets', this)">
+        <div class="nav-dot"></div> Bet Log
+      </div>
+    </div>
+
+    <!-- PAPER / LIVE TOGGLE -->
+    <div class="nav-section" style="margin-top:8px">
+      <div class="mode-toggle">
+        <div class="mode-toggle-label">Betting Mode</div>
+        <div class="mode-buttons">
+          <button class="mode-btn active-paper" id="btn-paper" onclick="setMode('paper')">PAPER</button>
+          <button class="mode-btn" id="btn-live"  onclick="setMode('live')">LIVE</button>
+        </div>
+        <div class="mode-indicator" id="mode-indicator">
+          <div class="mode-dot paper" id="mode-dot"></div>
+          <span id="mode-label" style="font-size:9px; color: var(--paper); letter-spacing:0.08em">PAPER MODE ACTIVE</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="nav-label" style="margin-bottom:10px">Data Status</div>
+      <div class="status-row">
+        <span class="status-sport">Tennis</span>
+        <span class="status-pill pill-green">5,632</span>
+      </div>
+      <div class="status-row">
+        <span class="status-sport">Darts</span>
+        <span class="status-pill pill-green">1,230</span>
+      </div>
+      <div class="status-row">
+        <span class="status-sport">Snooker</span>
+        <span class="status-pill pill-green">2,185</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── MAIN CONTENT ── -->
+  <main class="main">
+
+    <!-- ─────────────── DASHBOARD ─────────────── -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <div class="page-sub">Model health &amp; pipeline status</div>
+        </div>
+        <div class="timestamp">
+          <span class="live-dot"></span>
+          <span id="clock">10 MAR 2026 — 00:00:00</span>
+        </div>
+      </div>
+
+      <div id="paper-banner-dash" class="paper-banner show">
+        ◈ PAPER MODE — No real bets will be placed. Recommendations are logged only.
+      </div>
+
+      <div class="grid-4">
+        <div class="card card-accent">
+          <div class="card-label">Total Matches</div>
+          <div class="card-value">9,047</div>
+          <div class="card-sub">across 3 sports</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Tennis Matches</div>
+          <div class="card-value">5,632</div>
+          <div class="card-sub">ATP 2000–2025 ✓</div>
+          <div class="progress-wrap"><div class="progress-fill blue" style="width:100%"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Darts Matches</div>
+          <div class="card-value">1,230</div>
+          <div class="card-sub">PDC 2024–2025 ✓</div>
+          <div class="progress-wrap"><div class="progress-fill orange" style="width:100%"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Snooker Matches</div>
+          <div class="card-value">2,185</div>
+          <div class="card-sub">WST 2022–2025 ✓</div>
+          <div class="progress-wrap"><div class="progress-fill" style="width:100%"></div></div>
+        </div>
+      </div>
+
+      <div class="section-title">Live Edge Opportunities</div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <div class="table-title">Flagged Matches — Edge &gt; 5%</div>
+          <span class="status-pill pill-green">4 found</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Sport</th><th>Match</th><th>Market</th>
+              <th>Model</th><th>Book</th><th>Edge</th>
+              <th>Kelly %</th><th>Mode</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Djokovic vs Alcaraz</td>
+              <td>Aces O/U 22.5</td>
+              <td class="mono">26.1</td><td class="mono">22.5</td>
+              <td class="mono edge-high">+12.4%</td>
+              <td class="mono edge-high">4.2%</td>
+              <td><span class="status-pill pill-paper" id="mode-tag-1">PAPER</span></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Djokovic vs Alcaraz', 'OVER 22.5 Aces', 1.91)">CONFIRM</button></td>
+            </tr>
+            <tr>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Sinner vs Zverev</td>
+              <td>Aces O/U 18.5</td>
+              <td class="mono">15.2</td><td class="mono">18.5</td>
+              <td class="mono edge-high">+8.1%</td>
+              <td class="mono edge-high">2.8%</td>
+              <td><span class="status-pill pill-paper" id="mode-tag-2">PAPER</span></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Sinner vs Zverev', 'UNDER 18.5 Aces', 1.88)">CONFIRM</button></td>
+            </tr>
+            <tr>
+              <td><span class="sport-tag tag-darts">DARTS</span></td>
+              <td class="mono">MVG vs Wright</td>
+              <td>180s O/U 6.5</td>
+              <td class="mono">9.2</td><td class="mono">6.5</td>
+              <td class="mono edge-med">+6.7%</td>
+              <td class="mono edge-med">2.1%</td>
+              <td><span class="status-pill pill-paper" id="mode-tag-3">PAPER</span></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'MVG vs Wright', 'OVER 6.5 180s', 1.95)">CONFIRM</button></td>
+            </tr>
+            <tr>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Medvedev vs Rublev</td>
+              <td>Aces O/U 15.5</td>
+              <td class="mono">17.8</td><td class="mono">15.5</td>
+              <td class="mono edge-med">+5.3%</td>
+              <td class="mono edge-med">1.6%</td>
+              <td><span class="status-pill pill-paper" id="mode-tag-4">PAPER</span></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Medvedev vs Rublev', 'OVER 15.5 Aces', 1.91)">CONFIRM</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title">Model Performance — Last 90 Days</div>
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-label">Tennis — Aces Model</div>
+          <div style="display:flex; align-items:center; gap:16px; margin-top:8px">
+            <div>
+              <div class="card-value" style="font-size:22px; color:var(--accent)">+18.3%</div>
+              <div class="card-sub">ROI on 142 bets</div>
+            </div>
+            <div class="sparkline" style="flex:1">
+              <div class="spark-bar" style="height:30%"></div><div class="spark-bar" style="height:50%"></div>
+              <div class="spark-bar" style="height:40%"></div><div class="spark-bar" style="height:70%"></div>
+              <div class="spark-bar" style="height:55%"></div><div class="spark-bar" style="height:80%"></div>
+              <div class="spark-bar" style="height:65%"></div><div class="spark-bar active" style="height:90%"></div>
+            </div>
+          </div>
+          <div class="progress-wrap" style="margin-top:12px"><div class="progress-fill blue" style="width:73%"></div></div>
+          <div class="card-sub">73% edge accuracy</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Darts — 180s Model</div>
+          <div style="display:flex; align-items:center; gap:16px; margin-top:8px">
+            <div>
+              <div class="card-value" style="font-size:22px; color:var(--warn)">+4.1%</div>
+              <div class="card-sub">ROI on 23 bets</div>
+            </div>
+            <div class="sparkline" style="flex:1">
+              <div class="spark-bar" style="height:40%"></div><div class="spark-bar" style="height:35%"></div>
+              <div class="spark-bar" style="height:55%"></div><div class="spark-bar" style="height:45%"></div>
+              <div class="spark-bar active" style="height:60%; background:var(--warn)"></div>
+            </div>
+          </div>
+          <div class="progress-wrap" style="margin-top:12px"><div class="progress-fill orange" style="width:58%"></div></div>
+          <div class="card-sub">58% accuracy — early data</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Snooker — Centuries Model</div>
+          <div style="margin-top:8px">
+            <div class="card-value" style="font-size:22px; color:var(--muted)">—</div>
+            <div class="card-sub">model not yet built</div>
+          </div>
+          <div class="progress-wrap" style="margin-top:20px"><div class="progress-fill" style="width:0%"></div></div>
+          <div class="card-sub">0 bets placed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────── MATCH ANALYSER ─────────────── -->
+    <div id="page-analyser" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Match Analyser</div>
+          <div class="page-sub">Compute model line vs book — find edge</div>
+        </div>
+      </div>
+
+      <div class="analyser-grid">
+        <div class="card">
+          <div class="card-label" style="margin-bottom:16px">Match Input</div>
+          <div class="input-group">
+            <label class="input-label">Sport</label>
+            <select class="input-field" id="sport-select" onchange="updateMarket()">
+              <option value="tennis">Tennis — ATP</option>
+              <option value="darts">Darts — PDC</option>
+              <option value="snooker">Snooker — WST</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Player 1</label>
+            <input class="input-field" id="p1" type="text" placeholder="e.g. Novak Djokovic" value="Novak Djokovic">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Player 2</label>
+            <input class="input-field" id="p2" type="text" placeholder="e.g. Carlos Alcaraz" value="Carlos Alcaraz">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Tournament</label>
+            <select class="input-field">
+              <option>Wimbledon 2026</option><option>US Open 2026</option>
+              <option>Roland Garros 2026</option><option>Australian Open 2026</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label class="input-label" id="market-label">Market — Aces O/U</label>
+            <input class="input-field" id="book-line" type="number" step="0.5" placeholder="Book's line" value="22.5">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Book Odds (decimal)</label>
+            <input class="input-field" type="number" step="0.01" placeholder="e.g. 1.91" value="1.91">
+          </div>
+          <button class="btn btn-primary" onclick="runAnalysis()">▶ RUN ANALYSIS</button>
+        </div>
+
+        <div>
+          <div class="result-card" id="result-panel">
+            <div class="result-title">Analysis Result</div>
+            <div style="display:flex; align-items:flex-start; gap:20px; margin-bottom:20px">
+              <div>
+                <div class="result-big" id="result-edge">+12.4%</div>
+                <div class="result-label">estimated edge</div>
+              </div>
+              <div class="kelly-ring">
+                <div class="kelly-inner">
+                  <div class="kelly-val">4.2%</div>
+                  <div class="kelly-label">KELLY</div>
+                </div>
+              </div>
+            </div>
+            <div class="result-row"><span class="result-key">Match</span><span class="result-val mono">Djokovic vs Alcaraz</span></div>
+            <div class="result-row"><span class="result-key">Market</span><span class="result-val">Total Aces O/U 22.5</span></div>
+            <div class="result-row"><span class="result-key">Model prediction</span><span class="result-val mono green">26.1 aces</span></div>
+            <div class="result-row"><span class="result-key">P1 avg aces/match</span><span class="result-val mono">14.2 (last 30)</span></div>
+            <div class="result-row"><span class="result-key">P2 avg aces/match</span><span class="result-val mono">12.3 (last 30)</span></div>
+            <div class="result-row"><span class="result-key">Surface adj.</span><span class="result-val mono">+8% (grass)</span></div>
+            <div class="result-row"><span class="result-key">Implied probability</span><span class="result-val mono">52.4% → 64.8%</span></div>
+            <div class="rec-box">
+              <div class="rec-icon">◈</div>
+              <div class="rec-text">
+                <strong>BET OVER 22.5 ACES</strong><br>
+                Edge +12.4% — Kelly stake 4.2% of bank.<br>
+                Model confidence: high (n=47 similar matchups)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────── BACKTEST ─────────────── -->
+    <div id="page-backtest" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Backtest</div>
+          <div class="page-sub">Historical model accuracy &amp; ROI</div>
+        </div>
+      </div>
+
+      <div class="grid-4">
+        <div class="card card-accent">
+          <div class="card-label">Overall ROI</div>
+          <div class="card-value">+14.7%</div>
+          <div class="card-sub">165 qualifying bets</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Win Rate</div>
+          <div class="card-value blue">68%</div>
+          <div class="card-sub">on edges &gt; 5%</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Avg Edge</div>
+          <div class="card-value yellow">+7.3%</div>
+          <div class="card-sub">when model flags</div>
+        </div>
+        <div class="card card-red">
+          <div class="card-label">Max Drawdown</div>
+          <div class="card-value red">-8.4%</div>
+          <div class="card-sub">Feb 2025</div>
+        </div>
+      </div>
+
+      <div class="section-title">Performance by Sport</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Sport</th><th>Market</th><th>Bets</th><th>Win Rate</th><th>Avg Edge</th><th>ROI</th><th>P&amp;L (units)</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td>Aces O/U</td><td class="mono">142</td><td class="mono">71%</td>
+              <td class="mono edge-high">+8.1%</td><td class="mono edge-high">+18.3%</td>
+              <td class="mono edge-high">+26.0u</td>
+              <td><span class="status-pill pill-green">ACTIVE</span></td>
+            </tr>
+            <tr>
+              <td><span class="sport-tag tag-darts">DARTS</span></td>
+              <td>180s O/U</td><td class="mono">23</td><td class="mono">58%</td>
+              <td class="mono edge-med">+5.4%</td><td class="mono edge-med">+4.1%</td>
+              <td class="mono edge-med">+0.9u</td>
+              <td><span class="status-pill pill-orange">BUILDING</span></td>
+            </tr>
+            <tr>
+              <td><span class="sport-tag tag-snooker">SNOOKER</span></td>
+              <td>Centuries O/U</td><td class="mono">—</td><td class="mono">—</td>
+              <td class="mono edge-low">—</td><td class="mono edge-low">—</td>
+              <td class="mono edge-low">—</td>
+              <td><span class="status-pill pill-blue">PENDING</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-title">Tennis — ROI by Surface</div>
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-label">Grass</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+            <div class="bt-val green">+24.1%</div><div class="bt-label">31 bets</div>
+          </div>
+          <div class="progress-wrap" style="margin-top:10px"><div class="progress-fill" style="width:82%"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Hard</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+            <div class="bt-val blue">+16.8%</div><div class="bt-label">74 bets</div>
+          </div>
+          <div class="progress-wrap" style="margin-top:10px"><div class="progress-fill blue" style="width:68%"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Clay</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+            <div class="bt-val yellow">+9.2%</div><div class="bt-label">37 bets</div>
+          </div>
+          <div class="progress-wrap" style="margin-top:10px"><div class="progress-fill" style="width:44%; background:var(--yellow)"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────── PERFORMANCE ─────────────── -->
+    <div id="page-performance" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Performance</div>
+          <div class="page-sub">Balance, ROI and win/loss over time</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <span class="status-pill pill-paper" id="perf-mode-tag">PAPER</span>
+          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px" id="perf-bankroll">Bank: +14.7u</span>
+        </div>
+      </div>
+
+      <!-- Period tabs -->
+      <div class="period-tabs">
+        <button class="period-tab active" onclick="setPeriod('day',   this)">TODAY</button>
+        <button class="period-tab"        onclick="setPeriod('week',  this)">WEEK</button>
+        <button class="period-tab"        onclick="setPeriod('month', this)">MONTH</button>
+        <button class="period-tab"        onclick="setPeriod('ytd',   this)">YTD</button>
+        <button class="period-tab"        onclick="setPeriod('all',   this)">ALL TIME</button>
+      </div>
+
+      <!-- Summary stat cards -->
+      <div class="grid-5" id="perf-cards">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Balance curve -->
+      <div class="chart-wrap">
+        <div class="chart-title">Bankroll Curve (units)</div>
+        <canvas id="balance-chart" height="160"></canvas>
+      </div>
+
+      <!-- Win / Loss breakdown + per-sport -->
+      <div class="grid-2">
+        <div class="chart-wrap" style="margin-bottom:0">
+          <div class="chart-title">Win / Loss by Day</div>
+          <div class="wl-bar-wrap" id="wl-bars">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <div class="chart-wrap" style="margin-bottom:0">
+          <div class="chart-title">ROI by Sport</div>
+          <div class="wl-bar-wrap" id="sport-roi-bars">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed table -->
+      <div class="table-wrap" style="margin-top:24px">
+        <div class="table-header">
+          <div class="table-title" id="perf-table-title">Today's Bets</div>
+          <span class="status-pill pill-green" id="perf-table-badge">5 settled</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Sport</th><th>Match</th><th>Bet</th><th>Odds</th><th>Stake</th><th>Result</th><th>P&amp;L</th><th>Running</th></tr>
+          </thead>
+          <tbody id="perf-table-body">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ─────────────── BET LOG ─────────────── -->
+    <div id="page-bets" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Bet Log</div>
+          <div class="page-sub">All recommended bets &amp; outcomes</div>
+        </div>
+        <div style="display:flex; gap:8px">
+          <span class="status-pill pill-paper" id="betlog-mode-tag">PAPER</span>
+          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px">Bank: +14.7 units</span>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-header">
+          <div class="table-title">All Bets</div>
+          <span class="status-pill pill-green">+26.9u overall</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Sport</th><th>Match</th><th>Bet</th><th>Edge</th><th>Stake</th><th>Odds</th><th>Mode</th><th>Result</th><th>P&amp;L</th></tr>
+          </thead>
+          <tbody id="betlog-body">
+            <tr>
+              <td class="mono" style="color:var(--muted)">08 Mar</td>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Djokovic/Alcaraz</td><td>Aces OVER 22.5</td>
+              <td class="mono edge-high">+12.4%</td><td class="mono">4.2u</td><td class="mono">1.91</td>
+              <td><span class="status-pill pill-paper">PAPER</span></td>
+              <td><span class="status-pill pill-green">WIN</span></td>
+              <td class="mono edge-high">+3.8u</td>
+            </tr>
+            <tr>
+              <td class="mono" style="color:var(--muted)">07 Mar</td>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Sinner/Zverev</td><td>Aces UNDER 18.5</td>
+              <td class="mono edge-high">+8.1%</td><td class="mono">2.8u</td><td class="mono">1.88</td>
+              <td><span class="status-pill pill-paper">PAPER</span></td>
+              <td><span class="status-pill pill-green">WIN</span></td>
+              <td class="mono edge-high">+2.5u</td>
+            </tr>
+            <tr>
+              <td class="mono" style="color:var(--muted)">06 Mar</td>
+              <td><span class="sport-tag tag-darts">DARTS</span></td>
+              <td class="mono">MVG/Wright</td><td>180s OVER 6.5</td>
+              <td class="mono edge-med">+6.7%</td><td class="mono">2.1u</td><td class="mono">1.95</td>
+              <td><span class="status-pill pill-paper">PAPER</span></td>
+              <td><span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span></td>
+              <td class="mono red">-2.1u</td>
+            </tr>
+            <tr>
+              <td class="mono" style="color:var(--muted)">05 Mar</td>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Medvedev/Rublev</td><td>Aces OVER 15.5</td>
+              <td class="mono edge-med">+5.3%</td><td class="mono">1.6u</td><td class="mono">1.91</td>
+              <td><span class="status-pill pill-paper">PAPER</span></td>
+              <td><span class="status-pill pill-green">WIN</span></td>
+              <td class="mono edge-high">+1.5u</td>
+            </tr>
+            <tr>
+              <td class="mono" style="color:var(--muted)">04 Mar</td>
+              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
+              <td class="mono">Tsitsipas/Fritz</td><td>Aces OVER 17.5</td>
+              <td class="mono edge-high">+9.2%</td><td class="mono">3.1u</td><td class="mono">1.93</td>
+              <td><span class="status-pill pill-paper">PAPER</span></td>
+              <td><span class="status-pill pill-green">WIN</span></td>
+              <td class="mono edge-high">+2.9u</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── STATE ──
+let currentMode = 'paper';  // 'paper' | 'live'
+let currentPeriod = 'day';
+
+// ── NAVIGATION ──
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  el.classList.add('active');
+  if (id === 'performance') renderPerformance(currentPeriod);
+}
+
+// ── CLOCK ──
+function updateClock() {
+  const now = new Date();
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const d   = String(now.getDate()).padStart(2,'0');
+  const m   = months[now.getMonth()];
+  const y   = now.getFullYear();
+  const h   = String(now.getHours()).padStart(2,'0');
+  const min = String(now.getMinutes()).padStart(2,'0');
+  const s   = String(now.getSeconds()).padStart(2,'0');
+  const el  = document.getElementById('clock');
+  if (el) el.textContent = `${d} ${m} ${y} — ${h}:${min}:${s}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── PAPER / LIVE MODE ──
+function setMode(mode) {
+  currentMode = mode;
+  const btnPaper = document.getElementById('btn-paper');
+  const btnLive  = document.getElementById('btn-live');
+  const dot      = document.getElementById('mode-dot');
+  const label    = document.getElementById('mode-label');
+  const banner   = document.getElementById('paper-banner-dash');
+
+  btnPaper.className = 'mode-btn' + (mode === 'paper' ? ' active-paper' : '');
+  btnLive.className  = 'mode-btn' + (mode === 'live'  ? ' active-live'  : '');
+
+  if (mode === 'paper') {
+    dot.className   = 'mode-dot paper';
+    label.style.color = 'var(--paper)';
+    label.textContent = 'PAPER MODE ACTIVE';
+    banner && banner.classList.add('show');
+  } else {
+    dot.className   = 'mode-dot live';
+    label.style.color = 'var(--accent)';
+    label.textContent = 'LIVE MODE ACTIVE';
+    banner && banner.classList.remove('show');
+    if (!confirm('Switch to LIVE mode?\nReal bets will be placed via Sportmarket API.')) {
+      setMode('paper');
+      return;
+    }
+  }
+
+  // Update mode tags across pages
+  const modeTagClass = mode === 'paper' ? 'status-pill pill-paper' : 'status-pill pill-green';
+  const modeTagText  = mode === 'paper' ? 'PAPER' : 'LIVE';
+  ['mode-tag-1','mode-tag-2','mode-tag-3','mode-tag-4',
+   'perf-mode-tag','betlog-mode-tag'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.className = modeTagClass; el.textContent = modeTagText; }
+  });
+
+  // Re-render performance page mode indicator
+  renderPerformance(currentPeriod);
+}
+
+// ── CONFIRM BET ──
+function confirmBet(btn, match, bet, odds) {
+  const modeStr = currentMode === 'paper' ? '[PAPER] ' : '[LIVE] ';
+  const msg = `${modeStr}Place bet?\n\nMatch: ${match}\nBet: ${bet}\nOdds: ${odds}\n\n` +
+              (currentMode === 'live' ? '⚠ This will place a REAL order via Sportmarket.' : 'Paper mode — no real bet placed.');
+  if (confirm(msg)) {
+    btn.textContent = '✓ PLACED';
+    btn.disabled = true;
+    btn.style.background = currentMode === 'paper' ? 'var(--paper-dim)' : 'var(--accent-dim)';
+    btn.style.color       = currentMode === 'paper' ? 'var(--paper)' : 'var(--accent)';
+    btn.style.border      = `1px solid ${currentMode === 'paper' ? 'rgba(255,209,102,0.3)' : 'rgba(0,255,135,0.3)'}`;
+  }
+}
+
+// ── MARKET LABEL ──
+function updateMarket() {
+  const sport  = document.getElementById('sport-select').value;
+  const labels = { tennis: 'Market — Aces O/U', darts: 'Market — 180s O/U', snooker: 'Market — Centuries O/U' };
+  document.getElementById('market-label').textContent = labels[sport];
+}
+
+// ── ANALYSIS ──
+function runAnalysis() {
+  const sport    = document.getElementById('sport-select').value;
+  const bookLine = parseFloat(document.getElementById('book-line').value) || 22.5;
+  const edges    = { tennis: 12.4, darts: 6.7, snooker: 0 };
+  const edge     = edges[sport] + (Math.random() * 4 - 2);
+  const el       = document.getElementById('result-edge');
+  el.textContent = (edge > 0 ? '+' : '') + edge.toFixed(1) + '%';
+  el.style.color = edge > 5 ? 'var(--accent)' : edge > 0 ? 'var(--yellow)' : 'var(--red)';
+}
+
+// ── PERFORMANCE DATA ──
+const perfData = {
+  day: {
+    title: "Today's Bets",
+    pnl: +3.8, roi: +8.1, bets: 2, wins: 2, losses: 0,
+    bank: 114.7,
+    balanceCurve: [100, 100, 101.9, 101.9, 103.5, 103.5, 114.7, 114.7],
+    labels:       ['00:00','03:00','06:00','09:00','12:00','15:00','18:00','21:00'],
+    wlDays: [
+      { label: '09:30', wins: 1, losses: 0 },
+      { label: '14:20', wins: 1, losses: 0 },
+    ],
+    betsTable: [
+      { time: '14:20', sport: 'tennis', match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5', odds: '1.91', stake: '4.2u', result: 'WIN',  pnl: '+3.8u', running: '+3.8u' },
+      { time: '09:30', sport: 'tennis', match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5',odds: '1.88', stake: '2.8u', result: 'WIN',  pnl: '+2.5u', running: '+2.5u' },
+    ],
+  },
+  week: {
+    title: "This Week's Bets",
+    pnl: +8.6, roi: +7.2, bets: 7, wins: 5, losses: 2,
+    bank: 114.7,
+    balanceCurve: [100, 102.5, 101.0, 104.3, 107.1, 111.2, 114.7],
+    labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+    wlDays: [
+      { label: 'Mon', wins: 2, losses: 0 },
+      { label: 'Tue', wins: 0, losses: 1 },
+      { label: 'Wed', wins: 1, losses: 1 },
+      { label: 'Thu', wins: 1, losses: 0 },
+      { label: 'Fri', wins: 1, losses: 0 },
+    ],
+    betsTable: [
+      { time: '08 Mar', sport: 'tennis',  match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5',   odds: '1.91', stake: '4.2u', result: 'WIN',  pnl: '+3.8u', running: '+8.6u' },
+      { time: '07 Mar', sport: 'tennis',  match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5',  odds: '1.88', stake: '2.8u', result: 'WIN',  pnl: '+2.5u', running: '+4.8u' },
+      { time: '06 Mar', sport: 'darts',   match: 'MVG/Wright',        bet: '180s OVER 6.5',    odds: '1.95', stake: '2.1u', result: 'LOSS', pnl: '-2.1u', running: '+2.3u' },
+      { time: '05 Mar', sport: 'tennis',  match: 'Medvedev/Rublev',   bet: 'Aces OVER 15.5',   odds: '1.91', stake: '1.6u', result: 'WIN',  pnl: '+1.5u', running: '+4.4u' },
+      { time: '04 Mar', sport: 'tennis',  match: 'Tsitsipas/Fritz',   bet: 'Aces OVER 17.5',   odds: '1.93', stake: '3.1u', result: 'WIN',  pnl: '+2.9u', running: '+2.9u' },
+    ],
+  },
+  month: {
+    title: "This Month's Bets",
+    pnl: +14.7, roi: +9.4, bets: 22, wins: 16, losses: 6,
+    bank: 114.7,
+    balanceCurve: [100,101,99,102,104,103,107,106,109,111,110,113,114.7],
+    labels: Array.from({length:13}, (_,i) => `${i+1} Mar`),
+    wlDays: [
+      { label: 'W1', wins: 4, losses: 2 },
+      { label: 'W2', wins: 5, losses: 1 },
+      { label: 'W3', wins: 4, losses: 2 },
+      { label: 'W4', wins: 3, losses: 1 },
+    ],
+    betsTable: [],
+  },
+  ytd: {
+    title: "Year to Date",
+    pnl: +22.3, roi: +11.2, bets: 61, wins: 44, losses: 17,
+    bank: 122.3,
+    balanceCurve: [100,98,102,101,105,104,108,111,109,114,112,118,122.3],
+    labels: ['Jan','Jan','Feb','Feb','Feb','Mar','Mar','Mar','Mar','Mar','Mar','Mar','Mar'],
+    wlDays: [
+      { label: 'Jan', wins: 10, losses: 4 },
+      { label: 'Feb', wins: 18, losses: 7 },
+      { label: 'Mar', wins: 16, losses: 6 },
+    ],
+    betsTable: [],
+  },
+  all: {
+    title: "All Time",
+    pnl: +26.9, roi: +14.7, bets: 78, wins: 55, losses: 23,
+    bank: 126.9,
+    balanceCurve: [100,96,101,99,105,103,110,108,115,113,120,118,126.9],
+    labels: ['','','','','','','','','','','','',''],
+    wlDays: [
+      { label: '2025', wins: 30, losses: 12 },
+      { label: '2026', wins: 25, losses: 11 },
+    ],
+    betsTable: [],
+  },
+};
+
+const sportROI = [
+  { sport: 'Tennis',  roi: +18.3, bets: 142, color: 'var(--blue)'   },
+  { sport: 'Darts',   roi:  +4.1, bets:  23, color: 'var(--warn)'   },
+  { sport: 'Snooker', roi:    0,  bets:   0, color: 'var(--muted)'  },
+];
+
+function setPeriod(period, btn) {
+  currentPeriod = period;
+  document.querySelectorAll('.period-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderPerformance(period);
+}
+
+function renderPerformance(period) {
+  const d = perfData[period];
+  if (!d) return;
+
+  // ── Summary cards ──
+  const winRate = d.bets > 0 ? Math.round((d.wins / d.bets) * 100) : 0;
+  const pnlPos  = d.pnl >= 0;
+  document.getElementById('perf-cards').innerHTML = `
+    <div class="card ${pnlPos ? 'card-accent' : 'card-red'}">
+      <div class="card-label">P&amp;L</div>
+      <div class="card-value" style="color:${pnlPos ? 'var(--accent)' : 'var(--red)'}">${pnlPos?'+':''}${d.pnl.toFixed(1)}u</div>
+      <div class="card-sub">${period === 'day' ? 'today' : period === 'week' ? 'this week' : period === 'month' ? 'this month' : period === 'ytd' ? 'year to date' : 'all time'}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">ROI</div>
+      <div class="card-value" style="color:${d.roi >= 0 ? 'var(--accent)' : 'var(--red)'}">${d.roi >= 0?'+':''}${d.roi.toFixed(1)}%</div>
+      <div class="card-sub">${d.bets} bets placed</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Win Rate</div>
+      <div class="card-value blue">${winRate}%</div>
+      <div class="card-sub">${d.wins}W / ${d.losses}L</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Bankroll</div>
+      <div class="card-value" style="color:var(--accent)">${d.bank.toFixed(1)}u</div>
+      <div class="card-sub">from 100u starting</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Mode</div>
+      <div class="card-value" style="font-size:16px; color:${currentMode==='paper'?'var(--paper)':'var(--accent)'}">${currentMode.toUpperCase()}</div>
+      <div class="card-sub">${currentMode==='paper'?'no real orders':'live orders'}</div>
+    </div>
+  `;
+
+  // ── Balance chart ──
+  const canvas = document.getElementById('balance-chart');
+  if (canvas) drawBalanceChart(canvas, d.balanceCurve, d.labels);
+
+  // ── W/L bars ──
+  const wlContainer = document.getElementById('wl-bars');
+  if (wlContainer) {
+    const maxTotal = Math.max(...d.wlDays.map(r => r.wins + r.losses), 1);
+    wlContainer.innerHTML = d.wlDays.map(row => {
+      const total = row.wins + row.losses || 1;
+      const wPct  = Math.round((row.wins  / maxTotal) * 100);
+      const lPct  = Math.round((row.losses / maxTotal) * 100);
+      return `
+        <div class="wl-row">
+          <div class="wl-label">${row.label}</div>
+          <div style="flex:1; display:flex; flex-direction:column; gap:3px">
+            <div class="wl-bar-bg">
+              <div class="wl-bar-fill win" style="width:${wPct}%">${row.wins > 0 ? row.wins + 'W' : ''}</div>
+            </div>
+            <div class="wl-bar-bg">
+              <div class="wl-bar-fill loss" style="width:${lPct}%">${row.losses > 0 ? row.losses + 'L' : ''}</div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Sport ROI bars ──
+  const roiContainer = document.getElementById('sport-roi-bars');
+  if (roiContainer) {
+    const maxROI = Math.max(...sportROI.map(s => Math.abs(s.roi)), 1);
+    roiContainer.innerHTML = sportROI.map(s => {
+      const pct = Math.round((Math.abs(s.roi) / maxROI) * 100);
+      const col = s.roi > 0 ? (s.roi > 10 ? 'var(--accent)' : 'var(--yellow)') : 'var(--muted)';
+      return `
+        <div class="wl-row">
+          <div class="wl-label">${s.sport}</div>
+          <div class="wl-bar-bg" style="flex:1">
+            <div class="wl-bar-fill win" style="width:${pct}%; background: rgba(0,0,0,0); border-left: 3px solid ${col}; color:${col}">
+              ${s.roi > 0 ? '+' : ''}${s.roi.toFixed(1)}% (${s.bets} bets)
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Table ──
+  document.getElementById('perf-table-title').textContent = d.title;
+  document.getElementById('perf-table-badge').textContent = `${d.bets} settled`;
+  const tbody = document.getElementById('perf-table-body');
+  if (tbody) {
+    if (d.betsTable.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--muted); padding:24px">No detailed records for this period</td></tr>`;
+    } else {
+      tbody.innerHTML = d.betsTable.map(b => {
+        const tagClass = b.sport === 'tennis' ? 'tag-tennis' : b.sport === 'darts' ? 'tag-darts' : 'tag-snooker';
+        const isWin    = b.result === 'WIN';
+        const resultEl = isWin
+          ? `<span class="status-pill pill-green">WIN</span>`
+          : `<span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span>`;
+        const modePill = currentMode === 'paper'
+          ? `<span class="status-pill pill-paper">PAPER</span>`
+          : `<span class="status-pill pill-green">LIVE</span>`;
+        return `
+          <tr>
+            <td class="mono" style="color:var(--muted)">${b.time}</td>
+            <td><span class="sport-tag ${tagClass}">${b.sport.toUpperCase()}</span></td>
+            <td class="mono">${b.match}</td>
+            <td>${b.bet}</td>
+            <td class="mono">${b.odds}</td>
+            <td class="mono">${b.stake}</td>
+            <td>${resultEl}</td>
+            <td class="mono ${isWin ? 'edge-high' : 'red'}">${b.pnl}</td>
+            <td class="mono ${b.running.startsWith('+') ? 'edge-high' : 'red'}">${b.running}</td>
+          </tr>`;
+      }).join('');
+    }
+  }
+}
+
+// ── BALANCE CHART (canvas) ──
+function drawBalanceChart(canvas, data, labels) {
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 40;
+  const H   = 160;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const pad = { top: 10, right: 16, bottom: 28, left: 42 };
+  const cW  = W - pad.left - pad.right;
+  const cH  = H - pad.top  - pad.bottom;
+
+  const minV = Math.min(...data) - 2;
+  const maxV = Math.max(...data) + 2;
+  const range = maxV - minV || 1;
+
+  const xOf = i => pad.left + (i / (data.length - 1)) * cW;
+  const yOf = v => pad.top  + cH - ((v - minV) / range) * cH;
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+    const y = pad.top + t * cH;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y); ctx.stroke();
+  });
+
+  // Baseline (100u)
+  const yBase = yOf(100);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(pad.left, yBase); ctx.lineTo(pad.left + cW, yBase); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Area fill
+  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+  grad.addColorStop(0,   'rgba(0,255,135,0.15)');
+  grad.addColorStop(1,   'rgba(0,255,135,0)');
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(data[0]));
+  data.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
+  ctx.lineTo(xOf(data.length - 1), pad.top + cH);
+  ctx.lineTo(xOf(0), pad.top + cH);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(data[0]));
+  data.forEach((v, i) => ctx.lineTo(xOf(i), yOf(v)));
+  ctx.strokeStyle = 'rgba(0,255,135,0.8)';
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  // Dots at data points
+  data.forEach((v, i) => {
+    ctx.beginPath();
+    ctx.arc(xOf(i), yOf(v), 3, 0, Math.PI * 2);
+    ctx.fillStyle   = '#00ff87';
+    ctx.fill();
+  });
+
+  // Y-axis labels
+  ctx.fillStyle = 'rgba(102,102,112,0.8)';
+  ctx.font = '10px IBM Plex Mono, monospace';
+  ctx.textAlign = 'right';
+  [minV, (minV + maxV) / 2, maxV].forEach(v => {
+    ctx.fillText(v.toFixed(0) + 'u', pad.left - 6, yOf(v) + 4);
+  });
+
+  // X-axis labels
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(labels.length / 6));
+  labels.forEach((lbl, i) => {
+    if (i % step === 0 || i === labels.length - 1) {
+      ctx.fillText(lbl, xOf(i), H - 6);
+    }
+  });
+}
+
+// ── INIT ──
+renderPerformance('day');
+</script>
+</body>
+</html>
