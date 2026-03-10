@@ -40,10 +40,12 @@ ROUND_LABEL = {
     1:"R1",2:"R2",3:"R3",4:"R4",5:"QF",6:"SF",7:"F",8:"QF",9:"SF",10:"F"
 }
 
-MISMATCH_T = {"darts":7.0,  "snooker":0.15, "tennis":5.0}
+MISMATCH_T = {"darts":7.0,  "snooker":0.15, "tennis":9.0}  # tennis raised 5→9 (signal lives at 9+)
 PARITY_T   = {"darts":3.0,  "snooker":0.05, "tennis":2.0}
 LATE       = {5,6,7,8,9,10}
-LONG_FMT   = {"darts":13,   "snooker":17,   "tennis":5}
+LONG_FMT   = {"darts":13,   "snooker":17,   "tennis":3}   # tennis BO3 baseline
+
+TENNIS_LEAGUE_AVG_RET = 33.0  # ATP avg: returner wins ~33% of service points
 
 
 # ── NegBin fair line ──────────────────────────────────────────────────────────
@@ -65,23 +67,28 @@ def classify(gap, sport, rk, fmt_max):
 
 # ── Load from player_form ─────────────────────────────────────────────────────
 
-def _parse_format_max(fmt):
+def _parse_format_max(fmt, sport=None):
     import re
+    if sport == "tennis" or (fmt and "SETS" in fmt.upper()):
+        return 3   # tennis BO3 baseline — allows parity to fire
     m = re.search(r'(\d+)', fmt or '')
     return int(m.group(1)) if m else 0
 
 
 def load_darts(conn) -> list[dict]:
+    """
+    Darts: gap uses actual within-match avg (m.p1_avg) — more precise classifier.
+    Rolling form avg is too smooth for gap classification.
+    Rate (mu) uses rolling form rates from player_form.
+    """
     rows = conn.execute("""
         SELECT m.match_id, m.match_date, m.round, m.format,
                m.total_180s AS actual,
-               m.player1_id, m.player2_id,
-               pf1.avg_3dart        AS avg1,
-               pf2.avg_3dart        AS avg2,
+               m.p1_avg, m.p2_avg,
                pf1.avg_180_rate_per_leg AS rate1,
                pf2.avg_180_rate_per_leg AS rate2,
-               pf1.player_tier      AS tier1,
-               pf2.player_tier      AS tier2,
+               pf1.player_tier  AS tier1,
+               pf2.player_tier  AS tier2,
                m.p1_legs_won + m.p2_legs_won AS total_legs
         FROM matches m
         JOIN player_form pf1
@@ -94,18 +101,17 @@ def load_darts(conn) -> list[dict]:
            AND pf2.as_of_date = m.match_date
         WHERE m.sport = 'darts'
           AND m.total_180s IS NOT NULL
-          AND pf1.avg_3dart IS NOT NULL
-          AND pf2.avg_3dart IS NOT NULL
+          AND m.p1_avg IS NOT NULL
+          AND m.p2_avg IS NOT NULL
     """).fetchall()
 
     out = []
     for r in rows:
-        (mid, date, rnd, fmt, actual, p1, p2,
-         avg1, avg2, rate1, rate2, tier1, tier2, legs) = r
+        (mid, date, rnd, fmt, actual, avg1, avg2,
+         rate1, rate2, tier1, tier2, legs) = r
         rk      = ROUND_RANK.get(rnd, 3)
         fmt_max = _parse_format_max(fmt)
-        gap     = abs(avg1 - avg2)
-        # Predicted events: rate * legs (simple baseline for mu)
+        gap     = abs(avg1 - avg2)   # actual match avg gap — best classifier
         mu = ((rate1 or 0) + (rate2 or 0)) * (legs or fmt_max * 0.8) if legs else None
         out.append({
             "actual": actual, "gap": gap, "rk": rk, "fmt_max": fmt_max,
@@ -193,14 +199,26 @@ def load_tennis(conn) -> list[dict]:
          ar1_g, ar1_h, ar1_c, ar2_g, ar2_h, ar2_c,
          tier1, tier2) = r
         rk      = ROUND_RANK.get(rnd, 3)
-        fmt_max = 3  # tennis all BO3 in current dataset
+        fmt_max = _parse_format_max(fmt, sport="tennis")   # SETS → 3
         gap     = abs(ss1 - ss2)
 
-        # Use surface-specific ace rate if available
+        # Surface-specific ace rate
         surf = surface or "Hard"
         ar1 = {"Grass":ar1_g,"Hard":ar1_h,"Clay":ar1_c}.get(surf, ar1_all) or ar1_all
         ar2 = {"Grass":ar2_g,"Hard":ar2_h,"Clay":ar2_c}.get(surf, ar2_all) or ar2_all
-        mu  = ((ar1 or 0) * (svpt1 or 0) + (ar2 or 0) * (svpt2 or 0)) if (ar1 and ar2) else None
+
+        # Return quality modifier: adjust each player's ace rate for opponent's return strength
+        # If opponent wins more return pts than league avg → they suppress aces
+        # ret_pct_p2 = how often p2 wins points when p1 is serving
+        # We approximate: p2_ret_pct ≈ 100 - ss1 (ss1 = p1 serve strength = 100 - p2_ret%)
+        p2_ret_pct = (100 - ss1) if ss1 else TENNIS_LEAGUE_AVG_RET
+        p1_ret_pct = (100 - ss2) if ss2 else TENNIS_LEAGUE_AVG_RET
+        ar1_adj = (ar1 or 0) * (TENNIS_LEAGUE_AVG_RET / max(p2_ret_pct, 10))
+        ar2_adj = (ar2 or 0) * (TENNIS_LEAGUE_AVG_RET / max(p1_ret_pct, 10))
+
+        # Asymmetric service games: weak server (lower ss) loses service games in mismatch
+        # Both players' svpt are actuals — compression already embedded in the data
+        mu = (ar1_adj * (svpt1 or 0) + ar2_adj * (svpt2 or 0)) if (ar1 and ar2) else None
 
         out.append({
             "actual": actual, "gap": gap, "rk": rk, "fmt_max": fmt_max,
