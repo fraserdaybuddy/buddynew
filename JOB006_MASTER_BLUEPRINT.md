@@ -2225,17 +2225,113 @@ src/execution/
 
 ---
 
-## Stages 3–7: Pending
+## Stage 3: Model Layer — IN PROGRESS (2026-03-10)
 
-| Stage | Description | Dependency |
-|-------|-------------|------------|
-| Stage 3 | Poisson model (darts + snooker + tennis aces) | Stage 2 complete |
-| Stage 4 | Telegram report generator | Stage 3 complete |
-| Stage 5 | Reply parser + approval router | Stage 4 complete |
-| Stage 6 | Settlement tracker | Stage 5 complete |
-| Stage 7 | Crawl4AI upgrade (replace urllib scrapers) | Stage 3 validated |
+Model architecture updated from simple Poisson to full Negative Binomial stack
+based on Sports Event Totals Analytics doc (v1.0, March 2026).
+
+### Model Architecture
+
+```
+Model A — Negative Binomial count model     negbinom.py       PRIMARY
+Model B — LightGBM interaction discovery    (deferred — need more darts data)
+Model C — Bayesian shrinkage (sparse)       sparse_player.py
+Model D — Isotonic calibration              calibration.py
+Model E — Edge detection                    edge.py
+```
+
+### Core Thesis (operationalised)
+```
+expected_total = opportunity_count × event_rate
+
+opportunity_count:  legs played (darts) | frames played (snooker) | svc games (tennis)
+event_rate:         180s/leg | centuries/frame | aces/svc_game
+
+Signal A — MISMATCH → UNDER  (skill gap compresses match, fewer opportunities)
+Signal B — PARITY   → OVER   (extended match, more opportunities)
+```
+
+### Three Modelling Horizons
+| Horizon | Window | Purpose |
+|---------|--------|---------|
+| A — Core | Rolling 24-month | Structural analysis, model training |
+| B — Form | Last 7–15 matches | Rate trajectory, current form |
+| C — Anchor | Career | Weak prior for sparse players |
+
+### Player Tiers (sparse handling)
+| Tier | Matches in window | Treatment |
+|------|------------------|-----------|
+| 1 | 10+ | Full model |
+| 2 | 3–9 | Moderate shrinkage toward population prior |
+| 3 | 0–2 | Strong shrinkage — larger edge threshold required |
+
+### 6-Test Validation Ladder
+```
+Test 1 — Descriptive:    Does mismatch → lower totals in raw data?
+Test 2 — Conditional:    Does it hold within format (BO11 only)?
+Test 3 — Market:         actual_under_rate vs market_implied  [DEFERRED — no odds data]
+Test 4 — Profitability:  Simulate rule, track ROI + drawdown
+Test 5 — Stability:      Split 2024 vs 2025 — does edge persist?
+Test 6 — Execution:      Liquidity caps + slippage            [DEFERRED — needs live API]
+```
+
+### Build Order
+```
+[NOW]     signal_test.py      — thesis validation (does signal exist in data?)
+[NOW]     form_builder.py     — populate player_form table (rolling rates)
+[DAY 2]   negbinom.py         — NB simulation engine (10,000 iterations)
+[DAY 2]   sparse_player.py    — tier classification + shrinkage
+[DAY 3]   calibration.py      — isotonic regression calibration
+[DAY 3]   edge.py             — edge detection + stake sizing
+[DAY 3]   backtest.py         — walk-forward backtest, Tests 1-2+4-5
+[DAY 4]   model_test.py       — integration tests
+```
+
+### Files
+```
+src/model/
+  signal_test.py      — quick thesis test (gap → lower totals?)
+  form_builder.py     — player rolling rates → player_form table
+  negbinom.py         — NB count model + Monte Carlo simulation
+  sparse_player.py    — Bayesian shrinkage for Tier 2/3 players
+  calibration.py      — isotonic regression probability calibration
+  edge.py             — edge detection, Kelly stake, BetRecommendation
+  backtest.py         — walk-forward backtest, Tests 1-2+4-5
+  model_test.py       — integration tests
+```
+
+### Schema Changes Required (before model build)
+1. Extend `player_form` with model fields (trajectory, tier, surface rates, quality flag)
+2. Add `model_run_inputs` table (JSON blob, foreign key to model_runs)
+3. Add `FORMAT_EXPECTED_LEGS` lookup to config.py (darts legs proxy)
+4. Add `migrate_schema()` to database.py
+
+### Known Data Gaps
+| Gap | Impact | Mitigation |
+|-----|--------|------------|
+| `legs_sets_total` NULL for darts | Can't compute 180s/leg directly | Proxy via FORMAT_EXPECTED_LEGS lookup |
+| No ranking data | Can't compute ranking gap | Use `round` as ordinal mismatch proxy |
+| `betfair_markets` empty | Can't run Test 3 or 6 | Use default_line from config; defer |
+
+### Acceptance Criteria
+- signal_test.py: mismatch < parity avg (p < 0.05) on ≥ 2 sports
+- backtest ROI > 0% on edge-filtered bets across train + test split
+- Edge holds in 2024 AND 2025 separately (Test 5)
+- Calibration Brier score < 0.25
+- No look-ahead: all form computed strictly before match date
 
 ---
 
-*End of JOB-006 Master Blueprint v1.3*
-*Backup of v1.2 at: JOB006_MASTER_BLUEPRINT_v1.2_backup.md*
+## Stages 4–7: Pending (after server arrives ~2026-03-15)
+
+| Stage | Description | Dependency |
+|-------|-------------|------------|
+| Stage 4 | Telegram report generator | Stage 3 validated |
+| Stage 5 | Sportmarket harvester + name normalisation | Stage 3 validated |
+| Stage 6 | Settlement tracker | Stage 5 |
+| Stage 7 | FastAPI + dashboard wiring | Stage 5 |
+| Production | DATA_DIR migration, systemd, Linux deploy | Server arrived |
+
+---
+
+*End of JOB-006 Master Blueprint v1.6*
