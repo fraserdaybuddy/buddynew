@@ -1,378 +1,386 @@
-# Phase 1 EDA Report
+# Phase 1 EDA Report — v2
 ## Thesis Validation: Skill Gap × Event Rate Model
-**Date:** 2026-03-10 | **Status:** Complete — results ready for review
+## Results Assessed Against Test Results Interpretation Guide
+
+**Date:** 2026-03-10 | **Guide applied:** Test Results Interpretation Guide (March 2026)
 
 ---
 
-## 1. What Was Tested and Why
+## 1. What Was Tested
 
-The core thesis is that bookmakers misprice totals markets (180s, centuries, aces)
-because they use blended season averages. Our model separates the total into two
-independently predictable components:
-
+**Core thesis:**
 ```
-Expected total events = Opportunity count × Event rate per unit
+Expected events = Opportunity count × Event rate per unit
 
 Darts:   Expected 180s  = legs played         × 180s per leg
 Snooker: Expected cents = frames played        × centuries per frame
-Tennis:  Expected aces  = service pts played   × aces per service point
+Tennis:  Expected aces  = service pts played   × aces per service pt
 ```
 
-Before building the simulation model, we need to validate that both components are
-real and measurable. Two claims were tested:
+**Two claims tested:**
 
-**Claim 1 — Skill gap predicts opportunity count**
-If the match is mismatched (large skill gap between players), the dominant player wins
-units (legs/frames/service games) faster. The match ends earlier. Fewer opportunities
-for events to occur.
-
-**Claim 2 — Player rates × opportunity count outperforms naive average**
-If we know each player's historical event rate per unit, and we know how many units
-were played, does our prediction beat simply using the population mean?
-
-A model that cannot beat a naive average adds no value, regardless of how sophisticated
-its architecture is.
+- **Claim 1:** Larger skill gap → fewer units played (legs / frames / service pts)
+- **Claim 2:** Player_rate × opportunity_count beats naive season average
 
 ---
 
-## 2. Data Used
+## 2. Data and Methodology
 
-| Sport | Matches loaded | Analysed (after LOW_SAMPLE filter) | Excluded |
-|-------|---------------|-------------------------------------|----------|
-| Darts | 845 | 597 | 248 (player had < 5 prior matches) |
-| Snooker | 2,185 | 1,548 | 637 (player had < 5 prior matches) |
-| Tennis | 5,456 | 3,640 | 1,816 (player had < 5 prior matches) |
+| Sport | Total matches | Analysed | Excluded (LOW_SAMPLE) |
+|-------|--------------|----------|-----------------------|
+| Darts | 845 | 597 | 248 — player had < 5 prior matches |
+| Snooker | 2,185 | 1,548 | 637 — player had < 5 prior matches |
+| Tennis | 5,456 | 3,640 | 1,816 — player had < 5 prior matches |
 
-**LOW_SAMPLE filter:** Any match where either player had fewer than 5 prior matches
-in the dataset was excluded from analysis. This prevents unstable early-window
-estimates from contaminating the results. These matches are not discarded from the
-database — they are simply not yet eligible for confident prediction.
+**Skill gap metric per sport:**
+- Darts: rolling 3-dart average (last 15 matches). Raw scale 0–22 pts.
+- Snooker: rolling frame_win_rate per match (continuous 0–1). Captures degree of dominance.
+- Tennis: rolling serve strength = 100 − opponent_return_pts_won_pct. Scale ~60–80.
 
----
-
-## 3. Skill Gap Metric Used Per Sport
-
-All rolling metrics computed with strict date-prior cutoff — only matches played
-**before** the match being evaluated are included in each player's profile.
-
-### Darts
-**Metric:** Rolling 3-dart average (last 15 matches, equally weighted for EDA)
-**Skill gap:** `|avg_A − avg_B|`
-**Scale:** Typical gaps range 0–22 points. Mean gap in dataset: 5.6 pts.
-**Buckets:** 0–3 (parity), 3–7, 7–12, 12+ (mismatch)
-
-### Snooker
-**Metric:** Rolling frame win rate = `frames_won / total_frames` per match, averaged
-across last 15 matches. Continuous 0–1 scale. Captures degree of dominance
-(winning 9-0 vs 9-8 are different; binary win/loss loses this information).
-**Skill gap:** `|fwr_A − fwr_B|`
-**Buckets:** 0–0.05 (parity), 0.05–0.15, 0.15–0.25, 0.25+ (mismatch)
-
-### Tennis
-**Metric:** Rolling serve strength = `100 − opponent_return_pts_won_pct`
-This is the percentage of service points the player won. Available directly from
-Sackmann dataset; no ATP ranking required.
-**Skill gap:** `|serve_strength_A − serve_strength_B|`
-**Segmentation:** By surface (Hard/Clay/Grass) rather than format, since all
-matches in the dataset share the same format label ("SETS").
-**Buckets:** 0–2 (parity), 2–5, 5–9, 9+ (mismatch)
+**Rolling window:** Strictly date-prior cutoff. Only matches before the evaluated match.
 
 ---
 
-## 4. Results — Claim 1: Skill Gap Predicts Opportunity Count
+## 3. Claim 1 Results — Skill Gap Predicts Opportunity Count
 
-### 4.1 Darts — PASS
+**Guide criteria:**
+- PASS: negative slope, R² > 0.15 in 2+ sports
+- WEAK PASS: negative slope, R² < 0.10
+- FAIL: flat or positive slope
 
-**Table: Mean legs played by format and skill gap bucket**
+| Sport | Slope | R² | Spearman ρ | Verdict |
+|-------|-------|----|-----------|---------|
+| Darts | −0.018 | 0.012 (1.2%) | −0.090 | **WEAK PASS** |
+| Snooker | −0.166 | 0.004 (0.4%) | −0.054 | **WEAK PASS** |
+| Tennis | 0.000 | 0.000 | 0.000 | **UNASSESSABLE** |
 
-| Format | N | 0–3 (parity) | 3–7 | 7–12 | 12+ (mismatch) |
-|--------|---|--------------|-----|------|----------------|
-| BO11 | 432 | 11.7 (n=209) | 12.2 (n=142) | 10.4 (n=74) | 9.7 (n=7) |
-| BO13 | 107 | 13.3 (n=37) | 11.0 (n=40) | 9.1 (n=27) | 7.0 (n=3) |
-| BO9 | 58 | 4.9 (n=25) | 4.1 (n=20) | 4.5 (n=10) | 4.0 (n=3) |
+### Darts — WEAK PASS
 
-**Spearman ρ (gap vs legs/format_max): −0.090**
+The compression effect is present and directionally correct. Within BO11:
 
-**Interpretation:** The signal is present and in the right direction. In BO11 matches,
-parity matches (gap < 3 pts) average 11.7 legs — close to the maximum of 11. Mismatch
-matches (gap 12+ pts) average 9.7 legs. In BO13 the effect is clearer: 13.3 legs at
-parity vs 7.0 at maximum mismatch (a 47% compression). The Spearman correlation is
-weak (−0.09) but consistently negative across formats, confirming the direction.
+| Gap bucket | N | Mean legs | vs parity |
+|------------|---|-----------|-----------|
+| 0–3 pts (parity) | 209 | 11.7 | baseline |
+| 3–7 pts | 142 | 12.2 | +0.5 (wrong direction — noise) |
+| 7–12 pts | 74 | 10.4 | −1.3 |
+| 12+ pts (mismatch) | 7 | 9.7 | −2.0 |
 
-**Caveat:** The mismatch bucket (12+ pts) contains only 7 BO11 matches and 3 BO13
-matches — too few for statistical confidence at the extreme end. Larger samples
-needed, particularly at maximum mismatch. The bulk of matches (75%) sit in the
-0–7 point gap range where the effect is present but smaller.
+The 2-leg compression at maximum mismatch aligns with the guide's expectation
+(2–4 fewer legs at 10+ pt gap). However: the mismatch bucket contains only 7 BO11
+matches — far too few for statistical confidence. R² of 1.2% means skill gap explains
+barely more variance than chance.
 
----
+**Guide section 2.4 applies:** "Significant but weak (R² < 0.10): the model may still
+work if the small effect is consistent and not priced by the market, but your edge will
+be thin and fragile. Tighten edge thresholds to 8%+."
 
-### 4.2 Snooker — PASS
+**Critical data warning (Guide section 6.3):** The 248 excluded LOW_SAMPLE matches are
+disproportionately early-career and qualifier matches — exactly where skill gaps are
+widest. The strongest compression signal may be in the excluded data. The mismatch
+bucket is artificially thinned by this exclusion. This must be investigated.
 
-**Table: Mean frames played by format and skill gap bucket**
+### Snooker — WEAK PASS
 
-| Format | N | 0–0.05 (parity) | 0.05–0.15 | 0.15–0.25 | 0.25+ (mismatch) |
-|--------|---|-----------------|-----------|-----------|------------------|
-| BO7 | 588 | 5.7 (n=264) | 5.5 (n=261) | 5.7 (n=52) | 5.3 (n=11) |
-| BO19 | 332 | 15.9 (n=127) | 15.7 (n=164) | 15.3 (n=29) | 14.3 (n=12) |
-| BO11 | 311 | 9.2 (n=142) | 9.1 (n=132) | 9.1 (n=32) | 9.4 (n=5) |
-| BO9 | 267 | 7.0 (n=114) | 7.0 (n=118) | 6.9 (n=26) | 6.4 (n=9) |
+| Format | Parity mean frames | Mismatch mean frames | Compression |
+|--------|-------------------|---------------------|-------------|
+| BO19 | 15.9 | 14.3 | −1.6 (−10%) |
+| BO9 | 7.0 | 6.4 | −0.6 (−9%) |
+| BO7 | 5.7 | 5.3 | −0.4 (−7%) |
 
-**Spearman ρ (gap vs frames/format_max): −0.054**
+Direction is correct and the guide's format amplification prediction holds — BO19 shows
+more absolute compression than BO7. However R² is 0.4%, which is effectively negligible.
 
-**Interpretation:** The signal exists but is moderate. The clearest effect is in longer
-formats: BO19 shows parity at 15.9 frames vs mismatch at 14.3 (a 10% compression).
-BO7 shows minimal compression (5.7 vs 5.3), which makes structural sense — in a
-short format a dominant player has less room to compress further; the minimum is ~5
-frames regardless.
+**Frame_win_rate caveat:** The skill metric is based on match wins and losses without
+adjusting for opponent quality. A player going 6-9 vs elite opponents and 9-6 vs
+lower-ranked opponents have very different underlying quality, but identical rolling
+frame_win_rates. This suppresses the signal. Ranking-adjusted strength (Phase 2) is
+needed to reach the R² levels the guide expects.
 
-The key insight is that **snooker format length amplifies the mismatch effect**. A 10%
-frame compression in BO19 is significant for a totals market; the same 10% compression
-in BO7 moves the expected century count by less than 0.1. This means the highest-value
-snooker bets will cluster in long-format matches (BO19, BO25, BO33, BO35).
+**Guide section 5.2 applies:** "Snooker: weakest initial signal. Centuries are rare
+events, so variance is inherently high. Small sample sizes per profile cell. Expect
+wider confidence intervals and lower statistical significance." This is anticipated.
 
-**Caveat:** Mismatch bucket is thin across all formats (5–12 matches each). The rolling
-frame_win_rate is only based on 15 prior matches maximum, which in WST terms may span
-a full season or more for lower-ranked players. A player who has gone 6-9 in matches
-(40% frame win rate) may have faced tougher opponents — the metric doesn't adjust for
-opponent quality. This is the prize money / ranking objection raised in the external
-review, and it remains valid. Frame_win_rate is sufficient for Phase 1 validation but
-should be replaced with ranking-adjusted strength in the production model.
+### Tennis — UNASSESSABLE for Claim 1
 
----
+R² = 0 and slope = 0 are artefacts: all tennis matches have format = "SETS" with no
+numeric component, so format_max = 0 for all rows and the normalised regression
+excludes all matches. The Claim 1 test for tennis is structurally blocked until:
+1. Match scores are parsed to derive games/sets played, or
+2. ATP ranking points are imported as the competitiveness gap metric
 
-### 4.3 Tennis — WEAK
+**What the raw surface table shows (directionally):**
 
-**Table: Mean service points played by surface and skill gap bucket**
+| Surface | Parity svpt | Mismatch svpt | Compression |
+|---------|-------------|---------------|-------------|
+| Grass | 174.6 | 151.9 | −22.7 (−13%) |
+| Clay | 153.0 | 140.7 | −12.3 (−8%) |
+| Hard | 148.8 | 139.1 | −9.7 (−6%) |
 
-| Surface | N | 0–2 (parity) | 2–5 | 5–9 | 9+ (mismatch) |
-|---------|---|--------------|-----|-----|---------------|
-| Hard | 2,008 | 148.8 (n=592) | 152.9 (n=712) | 149.2 (n=538) | 139.1 (n=166) |
-| Clay | 1,143 | 153.0 (n=320) | 157.0 (n=384) | 147.9 (n=307) | 140.7 (n=132) |
-| Grass | 478 | 174.6 (n=129) | 160.6 (n=189) | 166.7 (n=126) | 151.9 (n=34) |
-
-**Spearman ρ (gap vs service_pts/format_max): ~0.0 (effectively flat)**
-
-**Interpretation:** The surface tables show the correct direction — mismatch matches
-(9+ serve_strength gap) produce fewer service points than parity matches on every
-surface. Grass shows the strongest compression: 174.6 svpt at parity vs 151.9 at
-mismatch (−13%). Hard and clay show −6% and −8% respectively.
-
-However, the overall Spearman correlation is near zero. The serve_strength differential
-alone is not capturing the full competitiveness signal. Two reasons:
-
-1. **The "2-5" bucket is often higher than parity** — this is consistent with a
-   non-linear relationship. A small serve advantage leads to more competitive service
-   games (more deuce situations) rather than fewer. The compression only kicks in at
-   large gaps.
-
-2. **Service points played is a partial measure of match length** — it captures serve
-   volume but not break patterns or set structure. A 6-1 6-1 match on clay produces
-   fewer svpt than a 7-6 7-6 match, but both may have similar serve_strength gaps.
-   A full service games played count (from match score parsing) would be a better
-   denominator.
-
-**Bottom line:** The thesis holds at the extremes on each surface, but serve_strength
-differential alone is too weak a signal for the Claim 1 test to pass cleanly.
-This should be revisited once ATP ranking points data is sourced (a stronger
-competitiveness predictor), or once match scores are parsed to yield games played.
+The surface effect is real and directionally correct — grass amplifies compression as
+the guide predicts. But without a proper unit count denominator, R² cannot be computed
+and the guide's PASS criteria cannot be applied.
 
 ---
 
-## 5. Results — Claim 2: Model vs Naive Average
+## 4. Claim 2 Results — Units × Rate vs Naive Average
 
-### 5.1 Darts — FAIL
+**Guide criteria (MAE, not RMSE):**
+- PASS: model MAE lower than naive by 10%+ in 2+ sports
+- WEAK PASS: 3–10% improvement
+- FAIL: model worse or tied
 
-| Metric | Value |
-|--------|-------|
-| Naive baseline (population mean 180s per match) | 7.64 |
-| Model RMSE | 5.80 |
-| Naive RMSE | 5.05 |
-| Improvement | **−14.7%** (model is worse) |
-| Mean prediction error | +1.54 (over-predicts by 1.5 180s on average) |
+| Sport | Naive MAE | Model MAE | Improvement | Verdict |
+|-------|-----------|-----------|-------------|---------|
+| Darts | 3.871 | 4.220 | **−9.0%** | **FAIL** |
+| Snooker | 0.905 | 0.792 | **+12.5%** | **WEAK PASS** |
+| Tennis | 5.726 | 3.596 | **+37.2%** | **PASS** |
 
-**Interpretation: The model is performing worse than simply guessing the average.**
+### Darts — FAIL
 
-This is the most important finding of the EDA. The rolling 180_rate × legs calculation
-is amplifying rather than reducing error. The +1.54 bias tells us the model
-systematically over-predicts.
+The model is 9% worse than guessing the population average. The segment breakdown
+reveals the mechanism:
 
-**Likely causes (to investigate):**
+| Gap bucket | N | Model MAE | Naive MAE | Model vs naive |
+|------------|---|-----------|-----------|----------------|
+| Parity (0–3) | 271 | 4.494 | 4.104 | −9.5% worse |
+| Mid (3–7) | 202 | 4.026 | 3.730 | −7.9% worse |
+| High (7–12) | 111 | 4.021 | 3.596 | −11.8% worse |
+| Mismatch (12+) | 13 | 3.240 | 2.556 | **−26.8% worse** |
 
-**A. The 180 rate denominator is wrong.**
-We are computing `180s per leg` using total legs played in the match. But a player
-who wins in 7 legs and a player who loses in 7 legs have different visit counts —
-the winner typically threw more efficiently. Using legs as the denominator treats
-all legs as equal when they are not. A truer rate would be `180s per visit`
-(3-dart throw), but we do not have visits in the dataset. This may be an
-irreducible data limitation.
+The model fails hardest in the mismatch bucket — exactly where the thesis predicts it
+should work best. This is a double failure signal.
 
-**B. 180s are genuinely high-variance events.**
-A 180 requires hitting treble-20 three times in a single visit. Even elite players
-hit them with a base rate of ~10–15% of visits under normal conditions, rising
-under rhythm but varying enormously across matches. Unlike century breaks (which
-require extended table time) or aces (which are a consistent serve choice), 180s
-have a large stochastic component that may not be forecastable at match level.
+**Guide section 3.3 applies:** "Model wins overall but loses on mismatches: the
+compression thesis specifically is not validated."
 
-**C. Small high-variance sample at the high end.**
-A match with one player hitting 8+ 180s pulls the error sharply. The rolling
-average cannot represent these outlier performances, so the model over-predicts
-for moderate matches and under-predicts for high-180 matches simultaneously.
+**Most likely causes:**
 
-**Decision:** Darts Claim 2 fails. Do not proceed to the production darts model
-until the rate calculation is revisited. Two options: (1) find visits data to
-compute 180s-per-visit instead of per-leg; (2) test whether a simpler model
-(predict total = f(avg_sum, format) as a direct regression) outperforms the
-rate × units architecture.
+1. **Rate denominator is wrong.** 180s-per-leg uses legs as the unit, but legs have
+   very different durations. A 9-dart leg (3 visits) offers 2 visit-chances for 180s.
+   A 24-dart leg (8 visits) offers 7 visit-chances. The correct denominator is visits
+   (3-dart throws), not legs. We don't have visit data. This is a structural data
+   limitation.
 
----
+2. **180s are high-variance events.** A 180 requires three treble-20s in one visit.
+   Even elite players hit this on ~10–15% of scoring visits — but variance is extreme.
+   Match-level totals swing from 0 to 15+ with no reliable predictor from rolling form.
 
-### 5.2 Snooker — PASS
+3. **Early form window instability.** Players in their 5th–9th matches (Tier 2) have
+   unstable rate estimates. The model over-predicts when the rate estimate is inflated
+   by one strong early match.
 
-| Metric | Value |
-|--------|-------|
-| Naive baseline (population mean centuries per match) | 1.04 |
-| Model RMSE | 1.038 |
-| Naive RMSE | 1.233 |
-| Improvement | **+15.8%** |
-| Mean prediction error | +0.025 (essentially unbiased) |
+**Guide failure taxonomy (section 7.3):**
+> *"Model worse than naive for Claim 2 → Event rate estimates are noisy →
+> Check form window length, try trimmed mean"*
 
-**Interpretation:** The model beats the naive average by 15.8% with near-zero bias.
-
-Century rate per frame is the cleanest metric in the dataset. It is:
-- **Player-specific:** Top attacking players hit centuries at 3–4× the rate of
-  safety specialists. Knowing who is playing is genuinely informative.
-- **Frame-normalised:** Dividing by frames played removes the dominant format effect.
-- **Stable:** Century rates are more consistent match-to-match than 180 rates,
-  because a century requires sustained table time (an extended structured sequence)
-  rather than three individual dart throws.
-
-**The compound effect is working:** Snooker is where the two-component model
-demonstrably adds value. A long-format match between two attacking players produces
-more centuries than a short-format match between safety players — and the model
-captures this.
+**Decision:** Darts Claim 2 FAILS. Do not proceed to darts simulation model.
+Two alternative approaches must be tested before proceeding:
+- A: Direct regression: `predicted_180s ~ avg_A + avg_B + format_max`
+  (bypass the rate × units architecture entirely)
+- B: Source visit-level data to correct the rate denominator
 
 ---
 
-### 5.3 Tennis — PASS (strongest result)
+### Snooker — WEAK PASS
 
-| Metric | Value |
-|--------|-------|
-| Naive baseline (population mean aces per match) | 9.48 |
-| Model RMSE | 4.885 |
-| Naive RMSE | 7.538 |
-| Improvement | **+35.2%** |
-| Mean prediction error | −0.053 (essentially unbiased) |
+| Gap bucket | N | Model MAE | Naive MAE | Improvement |
+|------------|---|-----------|-----------|-------------|
+| Parity (0–0.05) | 655 | 0.769 | 0.844 | +9.0% |
+| Mid (0.05–0.15) | 698 | 0.827 | 0.990 | +16.5% |
+| High (0.15–0.25) | 139 | 0.767 | 0.866 | +11.4% |
+| Mismatch (0.25+) | 37 | 0.653 | 0.736 | +11.3% |
 
-**Interpretation:** The model beats the naive average by 35.2% — the strongest
-result across all three sports, and with virtually no systematic bias.
+The model consistently beats naive across all segments. Improvement is largest in the
+mid and high buckets (where the frame_win_rate metric has most data) and holds in the
+mismatch bucket.
 
-This is explained by the extreme player heterogeneity in ace production. John Isner
-serves 15+ aces per match; clay court specialists may serve 2–3. The naive average
-(9.48) is wrong for almost everyone. Knowing the specific players' rolling ace
-rates allows the model to predict meaningfully.
+**Guide section 3.2 applies:** The improvement is present in mismatch scenarios —
+which is the correct pattern. The model is doing what the thesis requires.
 
-The 35% improvement also reflects the quality of the Sackmann dataset, which
-provides service points played per match — a reliable denominator. This is the
-data advantage tennis has over darts (no visits) and snooker (no break-level data).
+**Guide classification:** 12.5% improvement falls in the 8–15% range:
+> *"Moderate signal. The model helps but the edge is thinner. Proceed, but expect
+> smaller edges vs market."*
 
-**Note on Claim 1 / Claim 2 disconnect for tennis:** The model predicts well
-(Claim 2 PASS) even though the skill gap signal on service points is weak
-(Claim 1 WEAK). This means the ace prediction is currently driven almost entirely
-by player-level rate heterogeneity, not by match-length compression. The
-competitiveness gap component is not yet contributing meaningfully. This is
-important for understanding **which matches to bet**: right now the model is
-best at identifying high vs low ace producers, not at identifying matches where
-the total will be compressed by mismatch. Adding ATP ranking points data should
-strengthen the Claim 1 component and unlock the MISMATCH_UNDER signal properly.
+Century rate per frame is player-specific enough to add value. The compound model works
+for snooker at the WEAK PASS level. The path to PASS is stronger skill gap data
+(rankings) and a longer dataset.
 
 ---
 
-## 6. Summary Table
+### Tennis — PASS
 
-| Sport | Claim 1 | Claim 2 | Proceed? |
-|-------|---------|---------|----------|
-| Darts | ✓ PASS (ρ=−0.09) | ✗ FAIL (−14.7% vs naive) | No — fix rate calculation first |
-| Snooker | ✓ PASS (ρ=−0.05) | ✓ PASS (+15.8% vs naive) | Yes — build form_builder |
-| Tennis | ~ WEAK (ρ=−0.05) | ✓ PASS (+35.2% vs naive) | Conditional — Claim 2 strong, Claim 1 needs ranking data |
+| Gap bucket | N | Model MAE | Naive MAE | Improvement |
+|------------|---|-----------|-----------|-------------|
+| Parity (0–2) | 1,043 | 3.554 | 5.739 | +38.1% |
+| Mid (2–5) | 1,289 | 3.612 | 5.676 | +36.4% |
+| High (5–9) | 975 | 3.716 | 5.857 | +36.5% |
+| Mismatch (9+) | 333 | 3.314 | 5.459 | +39.3% |
 
----
+37.2% MAE improvement — strong PASS. The model beats naive across all segments with
+the highest improvement in the mismatch bucket (+39.3%), exactly as the thesis requires.
 
-## 7. Key Findings
+**What is driving this:** Ace rates are extremely player-heterogeneous. Isner averages
+15+ aces; clay-court grinders average 2–3. The naive mean (9.48) is wrong for almost
+every player. Knowing the player's surface-specific ace rate per service point is
+dramatically more informative than the population average.
 
-**Finding 1 — The thesis holds for snooker.**
-Both components are measurable, the skill gap compresses frame counts, and the
-rate × units model beats naive. Snooker is ready to proceed to form_builder.py.
+**Caveat — segment uniformity:** Improvement is nearly identical across all four gap
+buckets (36–39%). This means the prediction improvement comes almost entirely from
+player-level rate heterogeneity, not from match-length compression driven by skill gap.
+The Claim 1 component (fewer service games in mismatches) is not yet contributing.
+This model predicts ace totals well, but not because it models compression —
+because it models server identity.
 
-**Finding 2 — Tennis Claim 2 is strong but Claim 1 is incomplete.**
-The ace rate model works well because players are highly differentiated. But
-the match-length compression signal needs ATP ranking data (or match score
-parsing) to become reliable. The model can generate predictions but they will
-currently be driven by rate heterogeneity alone — the mismatch compression
-component is not yet active.
-
-**Finding 3 — Darts 180 rate calculation needs revisiting.**
-The two-component model fails for darts not because the thesis is wrong (Claim 1
-passes — legs are compressed by skill gap) but because 180s per leg is an
-unreliable event rate metric. The denominator (legs) is too coarse; the true
-unit should be visits (3-dart throws). Without visits data, a direct regression
-approach (predicted_180s = f(avg_A, avg_B, format)) should be tested as an
-alternative to the rate × units architecture.
-
-**Finding 4 — Format length is a major amplifier.**
-The mismatch compression effect is largest in long formats. BO19 snooker shows
-stronger compression than BO7. BO13 darts shows stronger compression than BO11.
-This has direct implications for bet selection: mismatch UNDER bets will be most
-reliable in long-format matches where the dominant player has more room to pull away.
-
-**Finding 5 — Surface is a major driver in tennis.**
-Grass court matches show the highest service point counts at parity (174.6) and
-the strongest absolute compression at mismatch (−22.7 svpt). Clay and hard courts
-follow the same direction. Surface-specific models (or at minimum surface as a
-mandatory feature) are required for tennis.
+**Implication:** The MISMATCH_UNDER signal for tennis is not yet validated by the data.
+The model can predict ace totals, but it cannot yet reliably classify which matches
+will be compressed. This component needs ATP ranking data.
 
 ---
 
-## 8. Recommended Next Steps
+## 5. Verdicts Against Guide Decision Tree
 
-**Immediate (blocks snooker model):**
-1. Build `form_builder.py` with proper decay weighting and tier system for snooker
-2. Source snooker ranking data (snooker.org API blocked, alternative source needed)
-   to replace frame_win_rate as Layer 1 skill metric
+### Claim 1 Decision Tree
 
-**Darts — before proceeding:**
-3. Test direct regression: `predicted_180s ~ avg_A + avg_B + format_max`
-   Compare RMSE against naive and against the rate × units model
-4. If regression beats both, use it. If not, investigate whether visits data
-   is available from any darts data source.
+| Sport | R² | Slope | Guide verdict |
+|-------|-----|-------|---------------|
+| Darts | 0.012 | −0.018 (neg) | **WEAK PASS** — raise edge thresholds to 8%+ |
+| Snooker | 0.004 | −0.166 (neg) | **WEAK PASS** — raise edge thresholds to 8%+ |
+| Tennis | UNASSESSABLE | N/A | **BLOCKED** — format data missing |
 
-**Tennis — parallel work:**
-5. Source ATP ranking points (Sackmann ranking CSVs — free, already mapped)
-   to strengthen Claim 1 competitiveness signal
-6. Parse match scores to derive games played (better unit count than svpt)
+Two sports show negative slope (required direction). Neither reaches R² > 0.10.
+Guide verdict: WEAK PASS for 2 sports. Proceed with caution. Raise edge threshold.
 
-**All sports — once form_builder is built:**
-7. Source historical market lines (Oddsportal scrape or Betfair historical)
-8. Run Claim 3: does model probability diverge from market implied probability?
-   (Currently blocked — results with synthetic median line are PROVISIONAL only)
+### Claim 2 Decision Tree
+
+| Sport | MAE improvement | Guide verdict |
+|-------|-----------------|---------------|
+| Darts | −9.0% | **FAIL** — model worse than naive. Stop. Investigate rate architecture. |
+| Snooker | +12.5% | **WEAK PASS** — proceed, expect smaller market edges |
+| Tennis | +37.2% | **PASS** — proceed confidently to Claim 3 |
+
+Model wins in 2 of 3 sports. Guide: "This is workable. Proceed with passing sports.
+Investigate why third fails."
 
 ---
 
-## 9. Open Questions for External Review
+## 6. Red Flags Against Guide Section 6
 
-1. **Darts rate architecture:** Given that 180s per leg fails as an event rate,
-   is there a better way to model 180s that does not require visits-level data?
-   Would a direct Negative Binomial regression on raw counts (with avg_sum and
-   format as predictors) be a more appropriate architecture for darts?
+### 6.1 — Results Too Good to Be True
+Not applicable. Results are modest and realistic. Tennis 37% MAE improvement is large
+but consistent with known player heterogeneity in ace rates (not suspicious).
 
-2. **Tennis Claim 1 weighting:** The two-gap approach (competitiveness_gap for
-   match length, serve_event_profile for ace rate) was designed to handle the
-   fact that serve strength predicts ace rate better than it predicts match length.
-   Given the Claim 2 results show the rate component dominates, should the model
-   de-emphasise the match-length compression component for tennis until ranking
-   data strengthens it?
+### 6.2 — Asymmetric Evidence Handling
+**Flag:** Our initial EDA report classified darts Claim 1 as PASS (ρ = −0.09, R² = 0.012).
+The guide requires R² > 0.15 for PASS. We were too generous. Corrected to WEAK PASS.
 
-3. **Snooker opponent quality:** Frame_win_rate does not adjust for strength of
-   schedule. A player who has beaten weak opponents to achieve a 70% frame win
-   rate is rated identically to a player who has beaten top-10 players at the
-   same rate. How much does this affect snooker predictions in practice, and at
-   what sample size does opponent quality correction become necessary?
+### 6.3 — Data Quality Masquerading as Signal
+
+**CRITICAL FLAG — Survivorship in form data:**
+> *"If player form is only computed for players with 10+ matches, you are
+> systematically excluding qualifiers and low-ranked players from mismatch analysis.
+> These are exactly the matches where the thesis should work best."*
+
+Our LOW_SAMPLE exclusion (< 5 matches) removes:
+- Darts: 248 matches (29% of dataset)
+- Snooker: 637 matches (29% of dataset)
+- Tennis: 1,816 matches (33% of dataset)
+
+These excluded matches are disproportionately early-career and qualifier appearances
+— where skill gaps are widest and compression most extreme. The darts mismatch
+bucket (12+ pts) has only 13 matches in the analysed set. It likely has many more
+in the excluded set.
+
+**Recommendation:** Run Claim 1 analysis on excluded matches using population
+average as the skill gap proxy (no rolling form available). Check whether
+compression is even stronger in these data-scarce high-gap matches.
+
+**NULL stats flag:**
+> *"If NULL 180s or NULL centuries were accidentally treated as 0, mismatch matches
+> (where the weaker player often has missing data) will show artificially low totals."*
+
+Darts has 385 matches (31%) with NULL total_180s. These NULLs are excluded per
+policy. Verified: no NULL-to-zero conversion in the analysis pipeline. Clean.
+
+---
+
+## 7. Structural Consistency Check (Guide Section 5)
+
+**Direction of compression:** Correct in all measurable sports (darts, snooker, tennis
+surface table). No sport shows expansion under mismatch. ✓
+
+**Format amplification:** Confirmed for snooker (BO19 > BO7 compression). Confirmed
+directionally for darts (BO13 > BO11). Tennis format not assessable. ✓
+
+**Dominant signal by sport (guide prediction vs actual):**
+
+| Sport | Guide predicts | Actual result |
+|-------|---------------|---------------|
+| Darts | MISMATCH UNDER dominates | Claim 2 fails — cannot assess yet |
+| Tennis | Both signals balanced | PARITY signal dominates (rate model, not compression) |
+| Snooker | PARITY OVER may be stronger | Model beats naive everywhere — neutral |
+
+Tennis note: the guide predicts both signals should be balanced. Currently only the
+parity/rate component is active. The mismatch compression component needs ATP
+ranking data to activate.
+
+---
+
+## 8. Summary and Recommended Actions
+
+### Overall Position (Per Guide Framework)
+
+| | Claim 1 | Claim 2 | Position |
+|--|---------|---------|----------|
+| **Darts** | WEAK PASS | FAIL | Blocked — fix rate architecture before proceeding |
+| **Snooker** | WEAK PASS | WEAK PASS | Proceed with caution — raise edge threshold to 8% |
+| **Tennis** | BLOCKED | PASS | Proceed on rate model — Claim 1 needs data work |
+
+### Ordered Actions
+
+**Priority 1 — Unblock Claim 1 for tennis:**
+Parse match scores to derive games/sets played (proper unit count denominator).
+Import ATP ranking points (Sackmann ranking CSVs — free, already identified).
+
+**Priority 2 — Fix darts Claim 2:**
+Test direct regression: `predicted_180s ~ avg_A + avg_B + format_max`.
+If regression beats naive, adopt it. The rate × units architecture may not be
+appropriate for darts given the visit-denominator problem.
+
+**Priority 3 — Investigate LOW_SAMPLE exclusions:**
+Run Claim 1 on excluded matches using population-mean skill proxies.
+Confirm the mismatch signal is not stronger in exactly the matches we excluded.
+
+**Priority 4 — Build snooker form_builder:**
+Snooker is the cleanest result (both claims pass at WEAK level). Build the rolling
+form window with decay weighting, trimmed mean, and tier system. Source ranking
+data to upgrade from WEAK PASS to PASS on Claim 1.
+
+**Priority 5 — Claim 3 (both snooker and tennis):**
+Remains blocked on market lines. Source historical Betfair lines or start logging
+Sportmarket lines forward. Any Claim 3 test with synthetic median line is
+PROVISIONAL per the guide — 30–50% of synthetic edges expected to vanish against
+real odds.
+
+---
+
+## 9. Open Questions for Review
+
+**Q1 — Darts architecture:**
+Given the failure of the rate × units model for darts, and the structural unavailability
+of visit data, is a direct Negative Binomial regression on raw 180 counts
+(features: avg_A, avg_B, format_max, round) a more appropriate architecture?
+Or is the visit-denominator problem solvable via an alternative data source?
+
+**Q2 — Tennis Claim 1 substitution:**
+The serve_strength differential fails as a Claim 1 metric (R² = 0). ATP ranking
+points differential is predicted to be stronger. But ranking points measure overall
+ability, not serve dominance specifically. For the ace totals market, is overall
+ranking the right competitiveness proxy, or does the model need a purpose-built
+"match length" predictor (e.g., hold% differential)?
+
+**Q3 — Snooker LOW_SAMPLE exclusions:**
+29% of snooker matches are excluded due to insufficient player history. If the
+strongest compression effects are in this excluded set (qualifiers vs top players),
+the production model will miss the best betting opportunities. Is there a lower
+sample minimum that is statistically defensible, or should Tier 3 shrinkage
+(toward population average) be applied rather than exclusion?
