@@ -1,6 +1,6 @@
 # JOB-006 Master Blueprint
 ## Sports Betting Model — Complete Agent-Ready Specification
-**Version:** 1.5 | **Status:** STAGE 1 COMPLETE — Darts scraper ready to run | **Date:** 2026-03-09
+**Version:** 1.6 | **Status:** STAGE 2 COMPLETE — Sportmarket adapter built and tested | **Date:** 2026-03-10
 
 ---
 
@@ -13,6 +13,7 @@
 | 1.3 | 2026-03-08 | Added tennis. Replaced urllib with Crawl4AI. Stage 1 built and tested. |
 | 1.4 | 2026-03-08 | **Full metric set per sport. Corrected tennis thesis (duration not style). Outlier-robust form builder (trimmed mean, 7-match window). Fractional Kelly confidence-tiered staking replacing fixed % model.** |
 | 1.5 | 2026-03-09 | **Data source archaeology complete. dartsdatabase.py DEPRECATED (no per-match 180s). darts24.com confirmed as primary darts source — provides 180s, 3-dart avg, 140+, 100+, checkout %, highest checkout per match. New darts24.py scraper built and tested. 16 major tournaments (2024+2025) mapped.** |
+| 1.6 | 2026-03-10 | **Stage 2 complete. Sportmarket adapter built: sportmarket.py (API client), governor.py (Kelly staking + circuit breaker), ledger_writer.py (pre-placement + settlement writes). 21/21 integration tests pass. Darts scraper resumed — 7 remaining 2024 tournaments running.** |
 
 ---
 
@@ -198,9 +199,23 @@ Or ALL / NONE / ALL H
       Stats: 3-dart avg, 180s, 140+, 100+, checkout % (hits/att), highest checkout
       Coverage: 2017+, all PDC majors, 16 tournaments mapped for 2024+2025
 
-[READY]   Run darts24.py to populate DB — 16 majors × ~100-160 matches each
-[NEXT]    Stage 2: Sportmarket adapter (execution layer)
-[PENDING] Stage 3: Poisson model + calibration runner
+[COMPLETE] Stage 1c: Darts data collection (2026-03-10)
+  ✓ darts24.py scraped 10/16 tournaments overnight (818 rows in staging_darts, PENDING)
+  ⚠ Scraper stopped at PDC Premier League 2024 match 19/35 — resumed this session
+  → Remaining 7 tournaments running in background now
+
+[COMPLETE] Stage 2: Sportmarket adapter (2026-03-10)
+  ✓ src/execution/sportmarket.py  — API client: betslip fetch, place, poll, close_all
+  ✓ src/execution/governor.py     — Kelly stake sizing, circuit breaker, LIVE_MODE gate
+  ✓ src/execution/ledger_writer.py — pre-placement write, order_placed update, settlement
+  ✓ src/execution/integration_test.py — 21/21 tests pass
+  Acceptance criteria met:
+    ✓ Paper mode places 0 real orders, writes full ledger row per intended bet
+    ✓ request_uuid prevents duplicate placement on retry
+    ✓ Emergency kill switch confirmed safe in paper mode
+    ✓ Ledger entry written BEFORE polling for settlement
+
+[NEXT]    Stage 3: Poisson model + calibration runner
 [PENDING] Stage 4: Report generator + Telegram formatter
 [PENDING] Stage 5: Reply parser + approval router
 [PENDING] Stage 6: Settlement tracker
