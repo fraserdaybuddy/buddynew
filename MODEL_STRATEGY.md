@@ -1,7 +1,7 @@
 # JOB-006 Model Strategy
 ## Thesis → Skill Gap → Variables → Tests → Build
 
-**Version:** 3.0 | **Date:** 2026-03-10
+**Version:** 3.1 | **Date:** 2026-03-10 | *Updated: external review recommendations applied*
 
 ---
 
@@ -44,6 +44,13 @@ signed_gap   = strength_A − strength_B     → simulation direction (who domin
 All scores normalised to z-scores within sport before computing gap, so thresholds
 are comparable across sports (gap > 1.0σ = mismatch, < 0.3σ = parity).
 
+**Z-score reference population:**
+- Population: all players in the 24-month rolling universe with ≥ 10 matches
+- Mean and std computed from this population and held fixed for the season
+- Players with < 10 matches are not z-scored — their rate is handled via shrinkage
+  (Tier 2/3 treatment) using the population mean as the prior, not a z-score
+- Recompute population mean/std at the start of each new season window
+
 ### Three layers — build in order
 
 | Layer | Metric | When to use |
@@ -83,7 +90,8 @@ of legs played vs avg alone.
 
 ### Snooker Skill Gap
 
-Predicts frame-win probability. Ranking is slow-moving; frame win rate is more current.
+Predicts frame-win probability. Ranking is the correct Layer 1 variable — it is an
+input independent of the specific match being predicted.
 
 **Layer 1:**
 ```
@@ -103,7 +111,11 @@ skill_gap = strength_A − strength_B
 | Frame win rate | 2,148 / 2,185 | p1_frames / (p1+p2 frames) from staging |
 | Century rate/frame | 2,148 / 2,185 | p1_centuries / total_frames from staging |
 
-Use frame_win_rate as Layer 1 proxy until rankings sourced. Rankings are the blocker.
+**⚠ SNOOKER IS BLOCKED until ranking data is sourced.**
+Do not substitute frame_win_rate as Layer 1. Frame win rate is a match outcome — using
+it to predict match outcomes is circular. It belongs in Layer 2 only, where it adjusts
+the ranking-based prior with recent form. Sourcing snooker.org rankings is prerequisite
+to any snooker analysis.
 
 ---
 
@@ -142,6 +154,37 @@ serve_event_profile  = ace_rate_A + ace_rate_B      (sum — both players contri
 No ATP ranking needed — serve/return strength from match data is a better predictor
 for this specific market than broad ranking.
 
+**Tennis signal classification rule (explicit):**
+
+Unlike darts and snooker where one gap produces one signal, tennis uses two gaps
+that must be combined with an explicit decision rule:
+
+```
+MISMATCH_UNDER:
+  competitiveness_gap > MISMATCH_THRESHOLD
+  → match will be compressed regardless of ace rate
+  → fewer service games → fewer total aces
+  → serve_event_profile not required to fire this signal
+
+PARITY_OVER:
+  |competitiveness_gap| < PARITY_THRESHOLD
+  AND serve_event_profile > ACE_THRESHOLD   ← both conditions required
+  → match goes deep AND both players generate aces per game
+  → without high serve_event_profile, a parity match still produces few aces
+
+NO_SIGNAL:
+  everything else
+```
+
+Rationale: compression from a skill gap dominates ace production.
+A mismatched match with two big servers still produces fewer total aces because
+there are fewer service games, not more. So MISMATCH_UNDER fires on gap alone.
+PARITY_OVER requires both — a close match between two defensive players
+(low serve_event_profile) does not produce an ace OVER.
+
+Thresholds (MISMATCH_THRESHOLD, PARITY_THRESHOLD, ACE_THRESHOLD) to be
+calibrated from Phase 1 data — not hardcoded before validation.
+
 ---
 
 ## Part 3 — Phase 1: Prove the Core Thesis
@@ -169,6 +212,16 @@ edge = model_probability − market_implied_probability
 ```
 Needs market lines. Proxy until sourced: use population median as synthetic line.
 If prediction never diverges meaningfully → market already prices this → no edge.
+
+**⚠ PROVISIONAL PASS caveat:**
+Passing Claim 3 with a synthetic median line does NOT validate edge against the real
+market. Real lines are set by sharp bettors and will be tighter than a naive median.
+A PROVISIONAL PASS means the model predicts differently from population average —
+a necessary but insufficient condition for edge.
+
+Claim 3 must be re-tested with real Betfair closing lines before Gate 2 is cleared.
+Until then, all edge calculations are labelled SYNTHETIC and treated as directional
+signals only, not confirmed edge.
 
 ---
 
@@ -224,9 +277,11 @@ Available: computable from century_rate_per_frame ✓
 **Head-to-head history**
 Some player pairings structurally produce higher or lower totals regardless of form.
 This may reflect style compatibility, psychological dynamics, or tactical patterns.
-- Compute mean total events in last 5 H2H matches for this specific pairing
-- Only apply if N ≥ 5 H2H matches exist
+- Only apply if N ≥ 8 H2H matches exist within the last 3 years
+- Recency filter: H2H matches older than 3 years excluded (different career phases,
+  different skill levels — not predictive of current matchup)
 - Weight: small modifier on event rate, not on unit count
+- N < 8 or no recent H2H → signal not applied, Tier A drives the prediction
 Available: derivable from matches table ✓ (requires player pairing lookup)
 
 **Breakout / sparse player handling**
