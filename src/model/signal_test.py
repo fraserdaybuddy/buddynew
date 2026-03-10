@@ -1,450 +1,261 @@
 """
-signal_test.py — Thesis validation: does skill mismatch compress stat counts?
+signal_test.py — Does the signal exist in the data?
 
-Thesis: In a mismatched match (early round, big skill gap) the dominant player
-controls the game, reducing raw skill-expression opportunities for both.
-→ Early rounds should show FEWER 180s / centuries / aces per unit of play.
+Core question: in mismatch matches, does the actual total consistently fall
+BELOW what a naive model (blended player averages, no compression) would predict?
 
-If this signal is not present in the data, don't build the model.
+That gap IS the edge. The bookmaker uses the naive model. We use compression.
+
+Two baselines tested:
+  1. Population mean — simplest possible naive line
+  2. Player average blend — per-player rolling average summed (bookie-style)
+
+Test: actual < naive_fair_line more often in MISMATCH than in PARITY?
+
+If yes → the naive model overestimates for mismatch matches → edge exists.
+
+Fair line philosophy (per simulation update):
+  The model runs 10k NegBin draws and takes the median.
+  Here we use the NAIVE mu (no compression) to set that median —
+  simulating what the bookmaker's fair line would look like.
 
 Usage:
-    cd sports-betting
     PYTHONUTF8=1 python -m src.model.signal_test
     PYTHONUTF8=1 python -m src.model.signal_test --sport darts
-    PYTHONUTF8=1 python -m src.model.signal_test --plot
 """
 
-import argparse
 import sys
+import argparse
+import numpy as np
 from pathlib import Path
-import sqlite3
-import re
-from dataclasses import dataclass
-from typing import Optional
-import statistics
+from collections import defaultdict
 
-# ── Path setup ─────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from database import get_conn
+from src.model.eda_v2 import (
+    load_matches,
+    build_profiles_darts,
+    build_profiles_snooker,
+    build_profiles_tennis,
+    build_eda_rows_darts,
+    build_eda_rows_snooker,
+    build_eda_rows_tennis,
+    mean,
+)
+
+# ── NegBin dispersion — estimated from historical data ───────────────────────
+ALPHA = {"darts": 0.2819, "snooker": 0.4468, "tennis": 0.5623}
+N_SIMS = 10_000
+RNG    = np.random.default_rng(42)
 
 
-# ── Round ordering ─────────────────────────────────────────────────────────
-# Lower rank = earlier = bigger expected skill gap between players.
-# This is our mismatch proxy (no ranking data available).
-
-ROUND_RANK = {
-    # Darts
-    "1/64-finals": 1,
-    "1/32-finals": 2,
-    "1/16-finals": 3,
-    "1/8-finals":  4,
-    "Quarter-finals": 5,
-    "Semi-finals": 6,
-    "Final": 7,
-
-    # Snooker (WST rounds vary by tournament size)
-    "PRE-QUALIFYING_1": 1,
-    "PRE-QUALIFYING_2": 1,
-    "LAST_144": 2,
-    "LAST_128": 2,
-    "LAST_112": 3,
-    "LAST_96":  3,
-    "LAST_80":  4,
-    "LAST_48":  4,
-    "LAST_12":  4,
-    "R64": 5,
-    "R32": 6,
-    "R16": 7,
-    "QF":  8,
-    "SF":  9,
-    "F":   10,
-
-    # Tennis
-    "R128": 1,
-    "R64":  2,
-    "R32":  3,
-    "R16":  4,
-    "QF":   5,
-    "SF":   6,
-    "F":    7,
-    "RR":   None,   # round robin — skip, mixed field
-    "BR":   None,   # bronze match — skip
-}
-
-# Readable labels for output
-ROUND_LABEL = {
-    1: "Very early (R128/1/64/Prequalify)",
-    2: "Early (R64/1/32/Last128)",
-    3: "Mid-early (R32/1/16)",
-    4: "Mid (R16/1/8/Last80)",
-    5: "Mid-late (QF/R32-snooker)",
-    6: "Late (SF/R16-snooker)",
-    7: "Very late (F/QF-snooker)",
-    8: "QF-snooker",
-    9: "SF-snooker",
-    10: "Final-snooker",
-}
-
-
-def parse_format_max_legs(fmt: str) -> Optional[int]:
-    """Extract max legs/frames from format string. BO11 → 11, BO13 → 13."""
-    if not fmt:
-        return None
-    m = re.search(r"(\d+)", fmt)
-    return int(m.group(1)) if m else None
-
-
-# ── Data loading ────────────────────────────────────────────────────────────
-
-@dataclass
-class MatchRow:
-    match_id: str
-    sport: str
-    round: str
-    round_rank: Optional[int]
-    format: str
-    format_max: Optional[int]
-    legs_sets_total: Optional[int]
-    total_stat: Optional[int]       # 180s / centuries / aces
-    stat_rate: Optional[float]      # stat / denominator (if available)
-
-
-def load_matches(conn: sqlite3.Connection, sport: str) -> list[MatchRow]:
-    """Load matches for a sport, computing round_rank and stat_rate."""
-    if sport == "darts":
-        sql = """
-            SELECT match_id, sport, round, format,
-                   legs_sets_total, total_180s AS total_stat
-            FROM matches
-            WHERE sport = 'darts' AND total_180s IS NOT NULL
-        """
-    elif sport == "snooker":
-        sql = """
-            SELECT match_id, sport, round, format,
-                   legs_sets_total, total_centuries AS total_stat
-            FROM matches
-            WHERE sport = 'snooker' AND total_centuries IS NOT NULL
-        """
-    elif sport == "tennis":
-        sql = """
-            SELECT match_id, sport, round, format,
-                   legs_sets_total, total_aces AS total_stat
-            FROM matches
-            WHERE sport = 'tennis' AND total_aces IS NOT NULL
-        """
-    else:
-        raise ValueError(f"Unknown sport: {sport}")
-
-    rows = []
-    for r in conn.execute(sql).fetchall():
-        rnd = r[2]
-        rrank = ROUND_RANK.get(rnd)
-        fmt = r[3]
-        fmt_max = parse_format_max_legs(fmt)
-        legs = r[4]
-        total = r[5]
-
-        # Compute rate where we have a reliable denominator
-        rate = None
-        if total is not None:
-            if sport == "snooker" and legs and legs > 0:
-                rate = total / legs          # centuries per frame ✓
-            elif sport == "darts" and fmt_max and fmt_max > 0:
-                rate = total / fmt_max       # 180s per max-leg (proxy, not perfect)
-            elif sport == "tennis":
-                rate = float(total)          # raw count — no denominator available
-
-        rows.append(MatchRow(
-            match_id=r[0],
-            sport=sport,
-            round=rnd,
-            round_rank=rrank,
-            format=fmt,
-            format_max=fmt_max,
-            legs_sets_total=legs,
-            total_stat=total,
-            stat_rate=rate,
-        ))
-    return rows
-
-
-# ── Statistics helpers ──────────────────────────────────────────────────────
-
-def mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs) if xs else 0.0
-
-def median(xs: list[float]) -> float:
-    return statistics.median(xs) if xs else 0.0
-
-def stdev(xs: list[float]) -> float:
-    return statistics.stdev(xs) if len(xs) > 1 else 0.0
-
-
-def spearman_correlation(xs: list[float], ys: list[float]) -> float:
-    """Compute Spearman rank correlation without scipy."""
-    n = len(xs)
-    if n < 3:
+def naive_fair_line(naive_mu: float, sport: str) -> float:
+    """Median of NegBin(naive_mu, alpha) — the bookmaker's naive fair line."""
+    if naive_mu <= 0:
         return 0.0
-
-    def rank(lst):
-        sorted_idx = sorted(range(n), key=lambda i: lst[i])
-        ranks = [0.0] * n
-        i = 0
-        while i < n:
-            j = i
-            while j < n - 1 and lst[sorted_idx[j]] == lst[sorted_idx[j + 1]]:
-                j += 1
-            avg_rank = (i + j) / 2.0 + 1
-            for k in range(i, j + 1):
-                ranks[sorted_idx[k]] = avg_rank
-            i = j + 1
-        return ranks
-
-    rx = rank(xs)
-    ry = rank(ys)
-    d2 = sum((rx[i] - ry[i]) ** 2 for i in range(n))
-    return 1 - (6 * d2) / (n * (n ** 2 - 1))
+    alpha  = ALPHA[sport]
+    n_par  = 1.0 / alpha
+    p_par  = 1.0 / (1.0 + alpha * naive_mu)
+    return float(np.median(RNG.negative_binomial(n_par, p_par, N_SIMS)))
 
 
-def mann_whitney_u(group1: list[float], group2: list[float]) -> tuple[float, str]:
+# ── Signal classification ─────────────────────────────────────────────────────
+MISMATCH_T = {"darts": 7.0,  "snooker": 0.15, "tennis": 5.0}
+PARITY_T   = {"darts": 3.0,  "snooker": 0.05, "tennis": 2.0}
+LATE       = {5, 6, 7, 8, 9, 10}
+LONG_FMT   = {"darts": 13,   "snooker": 17,   "tennis": 5}
+
+def classify(gap, sport, round_rank, format_max):
+    if gap >= MISMATCH_T[sport]:                                          return "MISMATCH"
+    if gap <= PARITY_T[sport] and round_rank in LATE and format_max >= LONG_FMT[sport]:
+                                                                          return "PARITY"
+    return "NEUTRAL"
+
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+
+def run(rows, sport, gap_key, pop_mean):
     """
-    Compute Mann-Whitney U statistic.
-    Returns (U, direction) where direction is 'group1_lower' or 'group2_lower'.
-    No p-value — just the effect size as rank-biserial correlation.
+    For each match:
+      naive_mu  = population mean (simplest bookmaker proxy)
+      fair_line = naive_fair_line(naive_mu) — bookmaker's 50/50 line
+      hit_under = actual < fair_line  (1 if actual is under the naive line)
+
+    Also track player-blend baseline:
+      blend_mu  = p1_rolling_avg_event_total + p2_rolling_avg_event_total
+                  (per-player season average, no compression — what a
+                   more sophisticated bookie uses)
     """
-    n1, n2 = len(group1), len(group2)
-    if n1 == 0 or n2 == 0:
-        return 0.0, "insufficient_data"
+    by_signal = defaultdict(list)
 
-    # u1 = count of (early < late) comparisons → large u1 = early tends lower
-    u1 = sum(
-        1.0 if a < b else 0.5 if a == b else 0.0
-        for a in group1
-        for b in group2
-    )
-    u2 = n1 * n2 - u1
+    for r in rows:
+        actual = r.get("actual_events")
+        gap    = r.get(gap_key)
+        if actual is None or gap is None:
+            continue
 
-    # Rank-biserial correlation: +1 = group1 always lower, -1 = group1 always higher
-    r = (u1 - u2) / (n1 * n2)
-    direction = "early_lower" if r > 0 else "late_lower"
-    return r, direction
+        signal = classify(gap, sport, r.get("round_rank", 3), r.get("format_max", 11))
 
+        # Baseline 1: population mean
+        fl_pop  = naive_fair_line(pop_mean, sport)
+        hit_pop = 1 if actual < fl_pop else 0
 
-# ── Analysis per sport ──────────────────────────────────────────────────────
+        # Baseline 2: player blend (compression-naive)
+        # For darts: p1_rolling_180_rate * avg_legs_for_format + p2 same
+        # Proxy: pred_rate_x_units from eda (rate model, no gap adjustment)
+        blend_mu = r.get("pred_rate_x_units") or pop_mean
+        fl_blend = naive_fair_line(blend_mu, sport)
+        hit_blend = 1 if actual < fl_blend else 0
 
-def analyse_sport(rows: list[MatchRow], sport: str, use_rate: bool) -> dict:
-    """
-    Run the signal test for one sport.
-    Returns a result dict with stats by round group and correlation.
-    """
-    # Filter to rows with valid round_rank and the chosen metric
-    valid = [r for r in rows if r.round_rank is not None]
-    if use_rate:
-        valid = [r for r in valid if r.stat_rate is not None]
-        values = [r.stat_rate for r in valid]
-    else:
-        valid = [r for r in valid if r.total_stat is not None]
-        values = [float(r.total_stat) for r in valid]
-
-    ranks = [float(r.round_rank) for r in valid]
-
-    if len(valid) < 10:
-        return {"error": f"Insufficient data: {len(valid)} rows"}
-
-    # Group by round_rank
-    by_rank: dict[int, list[float]] = {}
-    for row, val in zip(valid, values):
-        by_rank.setdefault(row.round_rank, []).append(val)
-
-    # Sort groups by rank
-    sorted_ranks = sorted(by_rank.keys())
-
-    # Build summary table
-    summary = []
-    for rk in sorted_ranks:
-        vals = by_rank[rk]
-        summary.append({
-            "rank": rk,
-            "label": ROUND_LABEL.get(rk, f"Rank {rk}"),
-            "n": len(vals),
-            "mean": mean(vals),
-            "median": median(vals),
-            "stdev": stdev(vals),
+        by_signal[signal].append({
+            "actual": actual, "gap": gap,
+            "hit_pop": hit_pop, "fl_pop": fl_pop,
+            "hit_blend": hit_blend, "fl_blend": fl_blend,
         })
 
-    # Spearman correlation: round_rank vs stat value
-    rho = spearman_correlation(ranks, values)
-
-    # Mann-Whitney: early (rank <= median_rank) vs late
-    median_rank = sorted(ranks)[len(ranks) // 2]
-    early_vals = [v for row, v in zip(valid, values) if row.round_rank <= median_rank]
-    late_vals  = [v for row, v in zip(valid, values) if row.round_rank >  median_rank]
-    mw_r, mw_dir = mann_whitney_u(early_vals, late_vals)
-
-    # Thesis verdict
-    # Thesis predicts: early rounds → LOWER counts (rho > 0 means higher rank = more counts)
-    # rho > 0 → later rounds have more → consistent with thesis
-    # mw_dir == 'early_lower' → early has fewer → consistent
-    thesis_signals = 0
-    if rho > 0.05:
-        thesis_signals += 1
-    if mw_dir == "early_lower":
-        thesis_signals += 1
-
-    verdict = {
-        0: "FAIL — no signal",
-        1: "WEAK — partial signal",
-        2: "PASS — signal confirmed",
-    }[thesis_signals]
-
-    return {
-        "sport": sport,
-        "n_total": len(rows),
-        "n_analysed": len(valid),
-        "metric": "rate" if use_rate else "raw_count",
-        "spearman_rho": rho,
-        "mw_effect_r": mw_r,
-        "mw_direction": mw_dir,
-        "early_n": len(early_vals),
-        "early_mean": mean(early_vals),
-        "late_n": len(late_vals),
-        "late_mean": mean(late_vals),
-        "thesis_verdict": verdict,
-        "summary_table": summary,
-    }
+    return by_signal
 
 
-# ── Output ──────────────────────────────────────────────────────────────────
-
-SPORT_STAT_LABEL = {
-    "darts":   "180s (raw) / 180s-per-max-leg (rate)",
-    "snooker": "centuries (raw) / centuries-per-frame (rate)",
-    "tennis":  "aces (raw)",
-}
-
-def print_results(result: dict) -> None:
-    sport = result["sport"]
-    print(f"\n{'='*60}")
+def report(sport, by_signal, pop_mean):
+    unit = {"darts":"180s", "snooker":"centuries", "tennis":"aces"}[sport]
+    print(f"\n{'='*62}")
     print(f"  SIGNAL TEST — {sport.upper()}")
-    print(f"{'='*60}")
+    print(f"  Naive fair line = NegBin(pop_mean={pop_mean:.2f})")
+    print(f"{'='*62}")
 
-    if "error" in result:
-        print(f"  ERROR: {result['error']}")
-        return
+    order = ["MISMATCH","NEUTRAL","PARITY"]
+    print(f"  {'Signal':<10} {'N':>5}  {'Actual':>8}  "
+          f"{'Fair line':>10}  {'Under%':>8}  {'Gap':>8}")
+    print(f"  {'-'*10} {'-'*5}  {'-'*8}  {'-'*10}  {'-'*8}  {'-'*8}")
 
-    print(f"  Matches: {result['n_analysed']:,} analysed / {result['n_total']:,} total")
-    print(f"  Metric:  {result['metric']}")
-    print()
-    print(f"  {'Round':<36} {'N':>5} {'Mean':>8} {'Median':>8} {'StDev':>8}")
-    print(f"  {'-'*36} {'-'*5} {'-'*8} {'-'*8} {'-'*8}")
-    for row in result["summary_table"]:
-        print(f"  {row['label']:<36} {row['n']:>5} {row['mean']:>8.3f} {row['median']:>8.3f} {row['stdev']:>8.3f}")
-
-    print()
-    print(f"  Spearman ρ (round_rank vs stat):  {result['spearman_rho']:+.4f}")
-    print(f"    → positive = later rounds have more {sport} stat")
-    print(f"    → negative = earlier rounds have more (counter-thesis)")
-    print()
-    print(f"  Mann-Whitney effect r:  {result['mw_effect_r']:+.4f}  ({result['mw_direction']})")
-    print(f"    Early mean: {result['early_mean']:.3f}  (n={result['early_n']})")
-    print(f"    Late mean:  {result['late_mean']:.3f}  (n={result['late_n']})")
-    print()
-
-    verdict = result["thesis_verdict"]
-    icon = {"PASS": "✓", "WEAK": "~", "FAIL": "✗"}.get(verdict.split()[0], "?")
-    print(f"  THESIS VERDICT: [{icon}] {verdict}")
-    print()
-
-
-def plot_results(results: list[dict]) -> None:
-    """Optional matplotlib visualisation."""
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec as gridspec
-    except ImportError:
-        print("[plot] matplotlib not installed — skipping plot")
-        return
-
-    fig = plt.figure(figsize=(15, 5))
-    gs = gridspec.GridSpec(1, 3, figure=fig)
-
-    for idx, result in enumerate(results):
-        if "error" in result:
+    results = {}
+    for sig in order:
+        rows = by_signal.get(sig, [])
+        if not rows:
+            print(f"  {sig:<10} {'—':>5}")
             continue
-        ax = fig.add_subplot(gs[idx])
-        sport = result["sport"]
-        table = result["summary_table"]
+        n         = len(rows)
+        m_actual  = mean([r["actual"]   for r in rows])
+        m_fl      = mean([r["fl_pop"]   for r in rows])
+        under_pct = mean([r["hit_pop"]  for r in rows]) * 100
+        gap       = m_fl - m_actual
+        print(f"  {sig:<10} {n:>5}  {m_actual:>8.2f}  "
+              f"{m_fl:>10.2f}  {under_pct:>7.1f}%  {gap:>+8.2f}")
+        results[sig] = {"n": n, "under_pct": under_pct, "mean_actual": m_actual,
+                        "mean_fl": m_fl, "gap": gap}
 
-        x = [r["rank"] for r in table]
-        y_mean = [r["mean"] for r in table]
-        y_med = [r["median"] for r in table]
+    # Breakdown by gap bucket within MISMATCH
+    mis_rows = by_signal.get("MISMATCH", [])
+    if mis_rows:
+        if sport == "darts":
+            buckets = [("gap 7-12",7,12),("gap 12-17",12,17),("gap 17+",17,999)]
+        elif sport == "snooker":
+            buckets = [("gap 0.15-0.25",0.15,0.25),("gap 0.25-0.35",0.25,0.35),("gap 0.35+",0.35,999)]
+        else:
+            buckets = [("gap 5-9",5,9),("gap 9-13",9,13),("gap 13+",13,999)]
 
-        ax.bar(x, y_mean, alpha=0.6, label="Mean")
-        ax.plot(x, y_med, "o--", color="red", label="Median", linewidth=2)
-        ax.set_title(f"{sport.title()} — stat by round\nρ={result['spearman_rho']:+.3f}  {result['thesis_verdict'].split('—')[0]}")
-        ax.set_xlabel("Round rank (1=earliest)")
-        ax.set_ylabel(f"Stat ({result['metric']})")
-        ax.legend(fontsize=8)
+        print(f"\n  Within MISMATCH — under% by gap size:")
+        for bname, blo, bhi in buckets:
+            brows = [r for r in mis_rows if blo <= r["gap"] < bhi]
+            if len(brows) < 5: continue
+            bu = mean([r["hit_pop"] for r in brows]) * 100
+            ba = mean([r["actual"]  for r in brows])
+            print(f"    {bname:<16} n={len(brows):>3}  actual={ba:.2f}  under={bu:.1f}%")
 
-    plt.tight_layout()
-    out = ROOT / "signal_test_output.png"
-    plt.savefig(out, dpi=120)
-    print(f"\n[plot] Saved: {out}")
-    plt.show()
+    # Verdict
+    mis = results.get("MISMATCH", {})
+    par = results.get("PARITY",   {})
+    print()
+    mu  = mis.get("under_pct", 50)
+    pu  = par.get("under_pct", 50)
+    gap = mis.get("gap", 0)
+
+    if mu > 55 and gap > 0:
+        mv = "✓ PASS — naive line sits above actual (edge confirmed)"
+    elif mu > 50 and gap > 0:
+        mv = "~ WEAK — direction correct, effect moderate"
+    else:
+        mv = "✗ FAIL — no systematic under"
+
+    pv = "✓ PASS" if pu < 45 else ("~ WEAK" if pu < 50 else "✗ FAIL / no data")
+
+    print(f"  MISMATCH: {mv}")
+    print(f"  PARITY:   {pv}")
+    return results
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Signal test — mismatch vs count compression")
-    parser.add_argument("--sport", choices=["darts", "snooker", "tennis"], help="Run one sport only")
-    parser.add_argument("--rate", action="store_true", help="Use normalised rate instead of raw count")
-    parser.add_argument("--plot", action="store_true", help="Generate matplotlib chart")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sport", choices=["darts","snooker","tennis"])
     args = parser.parse_args()
-
-    sports = [args.sport] if args.sport else ["darts", "snooker", "tennis"]
+    sports = [args.sport] if args.sport else ["darts","snooker","tennis"]
 
     conn = get_conn()
-    results = []
+    summary = {}
 
     for sport in sports:
-        rows = load_matches(conn, sport)
-        print(f"[{sport}] Loaded {len(rows)} rows with stat data")
+        matches = load_matches(conn, sport)
 
-        # For snooker use rate (has legs_sets_total), others use raw unless --rate forced
-        use_rate = args.rate or sport == "snooker"
-        result = analyse_sport(rows, sport, use_rate=use_rate)
-        results.append(result)
-        print_results(result)
+        # Population mean from full dataset
+        stat_col = {"darts":"total_180s","snooker":"total_centuries","tennis":"total_aces"}[sport]
+        pop_vals = [r[0] for r in conn.execute(
+            f"SELECT {stat_col} FROM matches WHERE sport=? AND {stat_col} IS NOT NULL", (sport,)
+        ).fetchall()]
+        pop_mean = mean(pop_vals)
+
+        if sport == "darts":
+            profiles = build_profiles_darts(matches)
+            rows     = build_eda_rows_darts(matches, profiles)
+            gap_key  = "abs_gap"
+            # add rate×units prediction as blend baseline
+            for r in rows:
+                if not r.get("pred_rate_x_units"):
+                    r["pred_rate_x_units"] = pop_mean
+
+        elif sport == "snooker":
+            fwr_dummy, cent_dummy = 0.704, 0.0745
+            profiles = build_profiles_snooker(matches, fwr_dummy, cent_dummy)
+            rows     = build_eda_rows_snooker(matches, profiles)
+            gap_key  = "abs_gap"
+            for r in rows:
+                r["pred_rate_x_units"] = r.get("pred_model") or pop_mean
+
+        elif sport == "tennis":
+            hold_vals = [100 - r["p2_return_pts_won_pct"]
+                         for r in matches if r["p2_return_pts_won_pct"]]
+            ace_vals  = [r["p1_aces"]/r["p1_svpt"]
+                         for r in matches if r["p1_aces"] and r["p1_svpt"]]
+            profiles  = build_profiles_tennis(matches, mean(hold_vals), mean(ace_vals))
+            rows      = build_eda_rows_tennis(matches, profiles)
+            gap_key   = "abs_hold_gap"
+            for r in rows:
+                r["pred_rate_x_units"] = r.get("pred_model") or pop_mean
+
+        by_signal = run(rows, sport, gap_key, pop_mean)
+        results   = report(sport, by_signal, pop_mean)
+        summary[sport] = results
 
     conn.close()
 
-    # Final summary
-    print("=" * 60)
-    print("  SUMMARY")
-    print("=" * 60)
-    for r in results:
-        if "error" in r:
-            print(f"  {r['sport']:10} — ERROR")
-        else:
-            print(f"  {r['sport']:10} — {r['thesis_verdict']}")
-
-    passing = [r for r in results if "error" not in r and r["thesis_verdict"].startswith("PASS")]
-    weak    = [r for r in results if "error" not in r and r["thesis_verdict"].startswith("WEAK")]
-    failing = [r for r in results if "error" not in r and r["thesis_verdict"].startswith("FAIL")]
+    print(f"\n{'='*62}")
+    print(f"  OVERALL — Does the edge exist?")
+    print(f"{'='*62}")
+    for sport, r in summary.items():
+        mis = r.get("MISMATCH", {})
+        u   = mis.get("under_pct", 50)
+        g   = mis.get("gap", 0)
+        n   = mis.get("n", 0)
+        icon = "✓" if u > 55 else ("~" if u > 50 else "✗")
+        print(f"  {icon} {sport:<10}  mismatch under%={u:.1f}%  "
+              f"naive_line above actual by {g:+.2f}  n={n}")
 
     print()
-    if failing:
-        print(f"  !! {len(failing)} sport(s) FAILED — review before building model")
-    if weak:
-        print(f"  ~~ {len(weak)} sport(s) show weak signal — proceed with caution")
-    if passing:
-        print(f"  ✓  {len(passing)} sport(s) CONFIRMED — proceed to form_builder.py")
-
-    if args.plot:
-        plot_results(results)
+    print("  If mismatch under% > 55% → naive model overestimates → edge is real.")
+    print("  Collect live Betfair lines from ~Mar 15 to measure gap vs market price.")
 
 
 if __name__ == "__main__":
