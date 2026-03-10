@@ -204,6 +204,13 @@ Or ALL / NONE / ALL H
   ⚠ Scraper stopped at PDC Premier League 2024 match 19/35 — resumed this session
   → Remaining 7 tournaments running in background now
 
+[COMPLETE] Stage 1d: All data collected and promoted (2026-03-10)
+  ✓ Darts:   1,230 matches in DB (16 tournaments, 2024+2025)
+  ✓ Snooker: 2,185 matches in DB (26 tournaments, 2022-2025)
+  ✓ Tennis:  5,632 matches in DB
+  ✓ alias_review_queue: 0 unresolved
+  Bug fixed: resolver.py — ResolutionQueued raised inside with block caused silent rollback
+
 [COMPLETE] Stage 2: Sportmarket adapter (2026-03-10)
   ✓ src/execution/sportmarket.py  — API client: betslip fetch, place, poll, close_all
   ✓ src/execution/governor.py     — Kelly stake sizing, circuit breaker, LIVE_MODE gate
