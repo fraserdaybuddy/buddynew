@@ -1,27 +1,19 @@
 """
 signal_test.py — Does the signal exist in the data?
 
-Core question: in mismatch matches, does the actual total consistently fall
-BELOW what a naive model (blended player averages, no compression) would predict?
+Reads form data from player_form table (populated by form_builder.py).
+No inline rolling computation — all metrics come from the DB.
 
-That gap IS the edge. The bookmaker uses the naive model. We use compression.
+Test: does actual fall below the NAIVE fair line in MISMATCH matches?
+      does actual exceed the NAIVE fair line in PARITY matches?
 
-Two baselines tested:
-  1. Population mean — simplest possible naive line
-  2. Player average blend — per-player rolling average summed (bookie-style)
-
-Test: actual < naive_fair_line more often in MISMATCH than in PARITY?
-
-If yes → the naive model overestimates for mismatch matches → edge exists.
-
-Fair line philosophy (per simulation update):
-  The model runs 10k NegBin draws and takes the median.
-  Here we use the NAIVE mu (no compression) to set that median —
-  simulating what the bookmaker's fair line would look like.
+Naive fair line = NegBin(population_mean) median — what a bookmaker using
+blended season averages would set as their 50/50 line.
 
 Usage:
     PYTHONUTF8=1 python -m src.model.signal_test
     PYTHONUTF8=1 python -m src.model.signal_test --sport darts
+    PYTHONUTF8=1 python -m src.model.signal_test --stage   # break by round
 """
 
 import sys
@@ -32,157 +24,284 @@ from collections import defaultdict
 
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-
 from database import get_conn
-from src.model.eda_v2 import (
-    load_matches,
-    build_profiles_darts,
-    build_profiles_snooker,
-    build_profiles_tennis,
-    build_eda_rows_darts,
-    build_eda_rows_snooker,
-    build_eda_rows_tennis,
-    mean,
-)
 
-# ── NegBin dispersion — estimated from historical data ───────────────────────
+RNG   = np.random.default_rng(42)
 ALPHA = {"darts": 0.2819, "snooker": 0.4468, "tennis": 0.5623}
-N_SIMS = 10_000
-RNG    = np.random.default_rng(42)
+N_SIM = 10_000
+
+ROUND_RANK = {
+    "1/64-finals":1,"1/32-finals":2,"1/16-finals":3,"1/8-finals":4,
+    "Quarter-finals":5,"Semi-finals":6,"Final":7,
+    "LAST_128":2,"LAST_96":3,"LAST_80":4,"R64":5,"R32":6,"R16":7,
+    "QF":8,"SF":9,"F":10,"R128":1,
+}
+ROUND_LABEL = {
+    1:"R1",2:"R2",3:"R3",4:"R4",5:"QF",6:"SF",7:"F",8:"QF",9:"SF",10:"F"
+}
+
+MISMATCH_T = {"darts":7.0,  "snooker":0.15, "tennis":5.0}
+PARITY_T   = {"darts":3.0,  "snooker":0.05, "tennis":2.0}
+LATE       = {5,6,7,8,9,10}
+LONG_FMT   = {"darts":13,   "snooker":17,   "tennis":5}
 
 
-def naive_fair_line(naive_mu: float, sport: str) -> float:
-    """Median of NegBin(naive_mu, alpha) — the bookmaker's naive fair line."""
-    if naive_mu <= 0:
-        return 0.0
-    alpha  = ALPHA[sport]
-    n_par  = 1.0 / alpha
-    p_par  = 1.0 / (1.0 + alpha * naive_mu)
-    return float(np.median(RNG.negative_binomial(n_par, p_par, N_SIMS)))
+# ── NegBin fair line ──────────────────────────────────────────────────────────
+
+def fair_line(mu: float, sport: str) -> float:
+    a = ALPHA[sport]
+    n, p = 1/a, 1/(1 + a*mu)
+    return float(np.median(RNG.negative_binomial(n, p, N_SIM)))
 
 
-# ── Signal classification ─────────────────────────────────────────────────────
-MISMATCH_T = {"darts": 7.0,  "snooker": 0.15, "tennis": 5.0}
-PARITY_T   = {"darts": 3.0,  "snooker": 0.05, "tennis": 2.0}
-LATE       = {5, 6, 7, 8, 9, 10}
-LONG_FMT   = {"darts": 13,   "snooker": 17,   "tennis": 5}
+def mean(xs): return sum(xs)/len(xs) if xs else 0.0
 
-def classify(gap, sport, round_rank, format_max):
-    if gap >= MISMATCH_T[sport]:                                          return "MISMATCH"
-    if gap <= PARITY_T[sport] and round_rank in LATE and format_max >= LONG_FMT[sport]:
-                                                                          return "PARITY"
+def classify(gap, sport, rk, fmt_max):
+    if gap >= MISMATCH_T[sport]:                                    return "MISMATCH"
+    if gap <= PARITY_T[sport] and rk in LATE and fmt_max >= LONG_FMT[sport]:
+                                                                    return "PARITY"
     return "NEUTRAL"
+
+
+# ── Load from player_form ─────────────────────────────────────────────────────
+
+def _parse_format_max(fmt):
+    import re
+    m = re.search(r'(\d+)', fmt or '')
+    return int(m.group(1)) if m else 0
+
+
+def load_darts(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT m.match_id, m.match_date, m.round, m.format,
+               m.total_180s AS actual,
+               m.player1_id, m.player2_id,
+               pf1.avg_3dart        AS avg1,
+               pf2.avg_3dart        AS avg2,
+               pf1.avg_180_rate_per_leg AS rate1,
+               pf2.avg_180_rate_per_leg AS rate2,
+               pf1.player_tier      AS tier1,
+               pf2.player_tier      AS tier2,
+               m.p1_legs_won + m.p2_legs_won AS total_legs
+        FROM matches m
+        JOIN player_form pf1
+            ON pf1.player_id = m.player1_id
+           AND pf1.sport = 'darts'
+           AND pf1.as_of_date = m.match_date
+        JOIN player_form pf2
+            ON pf2.player_id = m.player2_id
+           AND pf2.sport = 'darts'
+           AND pf2.as_of_date = m.match_date
+        WHERE m.sport = 'darts'
+          AND m.total_180s IS NOT NULL
+          AND pf1.avg_3dart IS NOT NULL
+          AND pf2.avg_3dart IS NOT NULL
+    """).fetchall()
+
+    out = []
+    for r in rows:
+        (mid, date, rnd, fmt, actual, p1, p2,
+         avg1, avg2, rate1, rate2, tier1, tier2, legs) = r
+        rk      = ROUND_RANK.get(rnd, 3)
+        fmt_max = _parse_format_max(fmt)
+        gap     = abs(avg1 - avg2)
+        # Predicted events: rate * legs (simple baseline for mu)
+        mu = ((rate1 or 0) + (rate2 or 0)) * (legs or fmt_max * 0.8) if legs else None
+        out.append({
+            "actual": actual, "gap": gap, "rk": rk, "fmt_max": fmt_max,
+            "mu": mu, "tier1": tier1, "tier2": tier2, "round": rnd,
+        })
+    return out
+
+
+def load_snooker(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT m.match_id, m.match_date, m.round, m.format,
+               m.total_centuries AS actual,
+               m.legs_sets_total AS frames,
+               pf1.frame_win_rate    AS fwr1,
+               pf2.frame_win_rate    AS fwr2,
+               pf1.avg_century_rate_per_frame AS cr1,
+               pf2.avg_century_rate_per_frame AS cr2,
+               pf1.player_tier AS tier1, pf2.player_tier AS tier2
+        FROM matches m
+        JOIN player_form pf1
+            ON pf1.player_id = m.player1_id
+           AND pf1.sport = 'snooker'
+           AND pf1.as_of_date = m.match_date
+        JOIN player_form pf2
+            ON pf2.player_id = m.player2_id
+           AND pf2.sport = 'snooker'
+           AND pf2.as_of_date = m.match_date
+        WHERE m.sport = 'snooker'
+          AND m.total_centuries IS NOT NULL
+          AND pf1.frame_win_rate IS NOT NULL
+          AND pf2.frame_win_rate IS NOT NULL
+    """).fetchall()
+
+    out = []
+    for r in rows:
+        (mid, date, rnd, fmt, actual, frames,
+         fwr1, fwr2, cr1, cr2, tier1, tier2) = r
+        rk      = ROUND_RANK.get(rnd, 3)
+        fmt_max = _parse_format_max(fmt)
+        gap     = abs(fwr1 - fwr2)
+        mu      = ((cr1 or 0) + (cr2 or 0)) * (frames or fmt_max * 0.8) if (cr1 and cr2) else None
+        out.append({
+            "actual": actual, "gap": gap, "rk": rk, "fmt_max": fmt_max,
+            "mu": mu, "tier1": tier1, "tier2": tier2, "round": rnd,
+        })
+    return out
+
+
+def load_tennis(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT m.match_id, m.match_date, m.round, m.format,
+               m.total_aces AS actual,
+               m.p1_svpt, m.p2_svpt,
+               t.surface,
+               pf1.avg_serve_strength AS ss1,
+               pf2.avg_serve_strength AS ss2,
+               pf1.avg_ace_rate_per_svpt AS ar1,
+               pf2.avg_ace_rate_per_svpt AS ar2,
+               pf1.avg_ace_rate_grass, pf1.avg_ace_rate_hard, pf1.avg_ace_rate_clay,
+               pf2.avg_ace_rate_grass, pf2.avg_ace_rate_hard, pf2.avg_ace_rate_clay,
+               pf1.player_tier AS tier1, pf2.player_tier AS tier2
+        FROM matches m
+        JOIN player_form pf1
+            ON pf1.player_id = m.player1_id
+           AND pf1.sport = 'tennis'
+           AND pf1.as_of_date = m.match_date
+        JOIN player_form pf2
+            ON pf2.player_id = m.player2_id
+           AND pf2.sport = 'tennis'
+           AND pf2.as_of_date = m.match_date
+        LEFT JOIN tournaments t ON t.tournament_id = m.tournament_id
+        WHERE m.sport = 'tennis'
+          AND m.total_aces IS NOT NULL
+          AND m.p1_svpt IS NOT NULL
+          AND pf1.avg_serve_strength IS NOT NULL
+          AND pf2.avg_serve_strength IS NOT NULL
+    """).fetchall()
+
+    surface_col = {"Grass":0, "Hard":1, "Clay":2}
+
+    out = []
+    for r in rows:
+        (mid, date, rnd, fmt, actual, svpt1, svpt2, surface,
+         ss1, ss2, ar1_all, ar2_all,
+         ar1_g, ar1_h, ar1_c, ar2_g, ar2_h, ar2_c,
+         tier1, tier2) = r
+        rk      = ROUND_RANK.get(rnd, 3)
+        fmt_max = 3  # tennis all BO3 in current dataset
+        gap     = abs(ss1 - ss2)
+
+        # Use surface-specific ace rate if available
+        surf = surface or "Hard"
+        ar1 = {"Grass":ar1_g,"Hard":ar1_h,"Clay":ar1_c}.get(surf, ar1_all) or ar1_all
+        ar2 = {"Grass":ar2_g,"Hard":ar2_h,"Clay":ar2_c}.get(surf, ar2_all) or ar2_all
+        mu  = ((ar1 or 0) * (svpt1 or 0) + (ar2 or 0) * (svpt2 or 0)) if (ar1 and ar2) else None
+
+        out.append({
+            "actual": actual, "gap": gap, "rk": rk, "fmt_max": fmt_max,
+            "mu": mu, "tier1": tier1, "tier2": tier2, "round": rnd,
+            "surface": surf,
+        })
+    return out
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
-def run(rows, sport, gap_key, pop_mean):
-    """
-    For each match:
-      naive_mu  = population mean (simplest bookmaker proxy)
-      fair_line = naive_fair_line(naive_mu) — bookmaker's 50/50 line
-      hit_under = actual < fair_line  (1 if actual is under the naive line)
-
-    Also track player-blend baseline:
-      blend_mu  = p1_rolling_avg_event_total + p2_rolling_avg_event_total
-                  (per-player season average, no compression — what a
-                   more sophisticated bookie uses)
-    """
+def run(rows, sport, pop_mean):
+    fl = fair_line(pop_mean, sport)
     by_signal = defaultdict(list)
 
     for r in rows:
-        actual = r.get("actual_events")
-        gap    = r.get(gap_key)
-        if actual is None or gap is None:
-            continue
-
-        signal = classify(gap, sport, r.get("round_rank", 3), r.get("format_max", 11))
-
-        # Baseline 1: population mean
-        fl_pop  = naive_fair_line(pop_mean, sport)
-        hit_pop = 1 if actual < fl_pop else 0
-
-        # Baseline 2: player blend (compression-naive)
-        # For darts: p1_rolling_180_rate * avg_legs_for_format + p2 same
-        # Proxy: pred_rate_x_units from eda (rate model, no gap adjustment)
-        blend_mu = r.get("pred_rate_x_units") or pop_mean
-        fl_blend = naive_fair_line(blend_mu, sport)
-        hit_blend = 1 if actual < fl_blend else 0
-
-        by_signal[signal].append({
-            "actual": actual, "gap": gap,
-            "hit_pop": hit_pop, "fl_pop": fl_pop,
-            "hit_blend": hit_blend, "fl_blend": fl_blend,
+        if r["actual"] is None or r["gap"] is None: continue
+        sig = classify(r["gap"], sport, r["rk"], r["fmt_max"])
+        by_signal[sig].append({
+            **r,
+            "fl":         fl,
+            "hit_under":  int(r["actual"] < fl),
+            "hit_over":   int(r["actual"] > fl),
         })
+    return by_signal, fl
 
-    return by_signal
 
-
-def report(sport, by_signal, pop_mean):
-    unit = {"darts":"180s", "snooker":"centuries", "tennis":"aces"}[sport]
+def report(sport, by_signal, pop_mean, fl, show_stage=False):
+    unit = {"darts":"180s","snooker":"centuries","tennis":"aces"}[sport]
     print(f"\n{'='*62}")
-    print(f"  SIGNAL TEST — {sport.upper()}")
-    print(f"  Naive fair line = NegBin(pop_mean={pop_mean:.2f})")
+    print(f"  {sport.upper()}  |  pop_mean={pop_mean:.2f}  naive_fair_line={fl:.1f}")
     print(f"{'='*62}")
 
-    order = ["MISMATCH","NEUTRAL","PARITY"]
-    print(f"  {'Signal':<10} {'N':>5}  {'Actual':>8}  "
-          f"{'Fair line':>10}  {'Under%':>8}  {'Gap':>8}")
-    print(f"  {'-'*10} {'-'*5}  {'-'*8}  {'-'*10}  {'-'*8}  {'-'*8}")
+    total = sum(len(v) for v in by_signal.values())
+    print(f"  Matches from player_form: {total:,}")
+
+    print(f"\n  {'Signal':<10} {'N':>5}  {'Actual':>8}  {'Fair':>6}  "
+          f"{'Under%':>7}  {'Over%':>6}  {'Gap':>7}")
+    print(f"  {'-'*10} {'-'*5}  {'-'*8}  {'-'*6}  {'-'*7}  {'-'*6}  {'-'*7}")
 
     results = {}
-    for sig in order:
+    for sig in ["MISMATCH","NEUTRAL","PARITY"]:
         rows = by_signal.get(sig, [])
         if not rows:
             print(f"  {sig:<10} {'—':>5}")
             continue
-        n         = len(rows)
-        m_actual  = mean([r["actual"]   for r in rows])
-        m_fl      = mean([r["fl_pop"]   for r in rows])
-        under_pct = mean([r["hit_pop"]  for r in rows]) * 100
-        gap       = m_fl - m_actual
-        print(f"  {sig:<10} {n:>5}  {m_actual:>8.2f}  "
-              f"{m_fl:>10.2f}  {under_pct:>7.1f}%  {gap:>+8.2f}")
-        results[sig] = {"n": n, "under_pct": under_pct, "mean_actual": m_actual,
-                        "mean_fl": m_fl, "gap": gap}
+        n   = len(rows)
+        ma  = mean([r["actual"]    for r in rows])
+        up  = mean([r["hit_under"] for r in rows]) * 100
+        op  = mean([r["hit_over"]  for r in rows]) * 100
+        gap = fl - ma
+        print(f"  {sig:<10} {n:>5}  {ma:>8.2f}  {fl:>6.1f}  "
+              f"{up:>6.1f}%  {op:>5.1f}%  {gap:>+7.2f}")
+        results[sig] = {"n":n, "under_pct":up, "over_pct":op, "mean_actual":ma, "gap":gap}
 
-    # Breakdown by gap bucket within MISMATCH
+    # Gap-bucket breakdown within MISMATCH
     mis_rows = by_signal.get("MISMATCH", [])
     if mis_rows:
         if sport == "darts":
-            buckets = [("gap 7-12",7,12),("gap 12-17",12,17),("gap 17+",17,999)]
+            buckets = [("7-12",7,12),("12-17",12,17),("17+",17,999)]
         elif sport == "snooker":
-            buckets = [("gap 0.15-0.25",0.15,0.25),("gap 0.25-0.35",0.25,0.35),("gap 0.35+",0.35,999)]
+            buckets = [("0.15-0.25",0.15,0.25),("0.25-0.35",0.25,0.35),("0.35+",0.35,999)]
         else:
-            buckets = [("gap 5-9",5,9),("gap 9-13",9,13),("gap 13+",13,999)]
-
-        print(f"\n  Within MISMATCH — under% by gap size:")
+            buckets = [("5-9",5,9),("9-13",9,13),("13+",13,999)]
+        print(f"\n  MISMATCH by gap size:")
         for bname, blo, bhi in buckets:
-            brows = [r for r in mis_rows if blo <= r["gap"] < bhi]
-            if len(brows) < 5: continue
-            bu = mean([r["hit_pop"] for r in brows]) * 100
-            ba = mean([r["actual"]  for r in brows])
-            print(f"    {bname:<16} n={len(brows):>3}  actual={ba:.2f}  under={bu:.1f}%")
+            b = [r for r in mis_rows if blo <= r["gap"] < bhi]
+            if len(b) < 5: continue
+            up = mean([r["hit_under"] for r in b])*100
+            ma = mean([r["actual"] for r in b])
+            print(f"    gap {bname:<10} n={len(b):>3}  actual={ma:.2f}  under={up:.1f}%")
 
-    # Verdict
+    # Stage breakdown
+    if show_stage:
+        print(f"\n  By round (UNDER% / OVER% vs naive line):")
+        by_rnd = defaultdict(list)
+        for sig_rows in by_signal.values():
+            for r in sig_rows:
+                by_rnd[r["rk"]].append(r)
+        print(f"  {'Round':<8} {'N':>4}  {'Actual':>8}  {'Under%':>8}  {'Over%':>7}  {'Signal':>10}")
+        for rk in sorted(by_rnd):
+            rrows = by_rnd[rk]
+            if len(rrows) < 5: continue
+            ma = mean([r["actual"]    for r in rrows])
+            up = mean([r["hit_under"] for r in rrows])*100
+            op = mean([r["hit_over"]  for r in rrows])*100
+            mis = sum(1 for r in rrows if r.get("gap",0) >= MISMATCH_T[sport])
+            par = sum(1 for r in rrows if r.get("gap",0) <= PARITY_T[sport])
+            print(f"  {ROUND_LABEL.get(rk,str(rk)):<8} {len(rrows):>4}  {ma:>8.2f}  "
+                  f"{up:>7.1f}%  {op:>6.1f}%  mis={mis} par={par}")
+
+    # Verdicts
     mis = results.get("MISMATCH", {})
     par = results.get("PARITY",   {})
     print()
-    mu  = mis.get("under_pct", 50)
-    pu  = par.get("under_pct", 50)
-    gap = mis.get("gap", 0)
-
-    if mu > 55 and gap > 0:
-        mv = "✓ PASS — naive line sits above actual (edge confirmed)"
-    elif mu > 50 and gap > 0:
-        mv = "~ WEAK — direction correct, effect moderate"
-    else:
-        mv = "✗ FAIL — no systematic under"
-
-    pv = "✓ PASS" if pu < 45 else ("~ WEAK" if pu < 50 else "✗ FAIL / no data")
-
-    print(f"  MISMATCH: {mv}")
-    print(f"  PARITY:   {pv}")
+    u = mis.get("under_pct", 50)
+    mv = ("✓ PASS" if u > 55 else "~ WEAK" if u > 50 else "✗ FAIL")
+    pv = ("✓ PASS" if par.get("over_pct",0) > 55
+          else "~ WEAK" if par.get("over_pct",0) > 50 else "✗ FAIL / no data")
+    print(f"  MISMATCH UNDER: {mv}  ({u:.1f}%)")
+    print(f"  PARITY   OVER:  {pv}  ({par.get('over_pct',0):.1f}%)")
     return results
 
 
@@ -190,72 +309,51 @@ def report(sport, by_signal, pop_mean):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sport", choices=["darts","snooker","tennis"])
+    parser.add_argument("--sport",  choices=["darts","snooker","tennis"])
+    parser.add_argument("--stage",  action="store_true", help="Show per-round breakdown")
     args = parser.parse_args()
     sports = [args.sport] if args.sport else ["darts","snooker","tennis"]
 
-    conn = get_conn()
+    conn    = get_conn()
     summary = {}
 
+    STAT_COL = {"darts":"total_180s","snooker":"total_centuries","tennis":"total_aces"}
+
     for sport in sports:
-        matches = load_matches(conn, sport)
-
-        # Population mean from full dataset
-        stat_col = {"darts":"total_180s","snooker":"total_centuries","tennis":"total_aces"}[sport]
         pop_vals = [r[0] for r in conn.execute(
-            f"SELECT {stat_col} FROM matches WHERE sport=? AND {stat_col} IS NOT NULL", (sport,)
-        ).fetchall()]
-        pop_mean = mean(pop_vals)
+            f"SELECT {STAT_COL[sport]} FROM matches WHERE sport=? AND {STAT_COL[sport]} IS NOT NULL",
+            (sport,)).fetchall()]
+        pop_mean = sum(pop_vals)/len(pop_vals) if pop_vals else 5.0
 
-        if sport == "darts":
-            profiles = build_profiles_darts(matches)
-            rows     = build_eda_rows_darts(matches, profiles)
-            gap_key  = "abs_gap"
-            # add rate×units prediction as blend baseline
-            for r in rows:
-                if not r.get("pred_rate_x_units"):
-                    r["pred_rate_x_units"] = pop_mean
+        if sport == "darts":       rows = load_darts(conn)
+        elif sport == "snooker":   rows = load_snooker(conn)
+        else:                      rows = load_tennis(conn)
 
-        elif sport == "snooker":
-            fwr_dummy, cent_dummy = 0.704, 0.0745
-            profiles = build_profiles_snooker(matches, fwr_dummy, cent_dummy)
-            rows     = build_eda_rows_snooker(matches, profiles)
-            gap_key  = "abs_gap"
-            for r in rows:
-                r["pred_rate_x_units"] = r.get("pred_model") or pop_mean
-
-        elif sport == "tennis":
-            hold_vals = [100 - r["p2_return_pts_won_pct"]
-                         for r in matches if r["p2_return_pts_won_pct"]]
-            ace_vals  = [r["p1_aces"]/r["p1_svpt"]
-                         for r in matches if r["p1_aces"] and r["p1_svpt"]]
-            profiles  = build_profiles_tennis(matches, mean(hold_vals), mean(ace_vals))
-            rows      = build_eda_rows_tennis(matches, profiles)
-            gap_key   = "abs_hold_gap"
-            for r in rows:
-                r["pred_rate_x_units"] = r.get("pred_model") or pop_mean
-
-        by_signal = run(rows, sport, gap_key, pop_mean)
-        results   = report(sport, by_signal, pop_mean)
+        by_signal, fl = run(rows, sport, pop_mean)
+        results = report(sport, by_signal, pop_mean, fl, args.stage)
         summary[sport] = results
 
     conn.close()
 
     print(f"\n{'='*62}")
-    print(f"  OVERALL — Does the edge exist?")
+    print(f"  SUMMARY — signal vs naive fair line")
     print(f"{'='*62}")
     for sport, r in summary.items():
         mis = r.get("MISMATCH", {})
+        par = r.get("PARITY",   {})
         u   = mis.get("under_pct", 50)
-        g   = mis.get("gap", 0)
-        n   = mis.get("n", 0)
-        icon = "✓" if u > 55 else ("~" if u > 50 else "✗")
-        print(f"  {icon} {sport:<10}  mismatch under%={u:.1f}%  "
-              f"naive_line above actual by {g:+.2f}  n={n}")
+        o   = par.get("over_pct",  50)
+        n_m = mis.get("n", 0)
+        n_p = par.get("n", 0)
+        ui  = "✓" if u>55 else "~" if u>50 else "✗"
+        oi  = "✓" if o>55 else "~" if o>50 else "✗"
+        print(f"  {sport:<10}  UNDER [{ui}]{u:.1f}% (n={n_m})  "
+              f"OVER [{oi}]{o:.1f}% (n={n_p})")
 
     print()
-    print("  If mismatch under% > 55% → naive model overestimates → edge is real.")
-    print("  Collect live Betfair lines from ~Mar 15 to measure gap vs market price.")
+    print("  Naive fair line = NegBin(pop_mean) median.")
+    print("  All form data from player_form (form_builder output).")
+    print("  Real market lines needed for Claim 3 — collect via Sportmarket from ~Mar 15.")
 
 
 if __name__ == "__main__":

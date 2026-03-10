@@ -51,6 +51,7 @@ EXTRA_COLS = [
     ("avg_3dart",               "REAL"),    # darts — rolling weighted avg
     ("avg_180_rate_per_leg",    "REAL"),    # darts — trimmed mean
     ("avg_180_rate_median",     "REAL"),    # darts — diagnostic
+    ("frame_win_rate",           "REAL"),    # snooker — rolling weighted fwr (skill proxy)
     ("avg_century_rate_per_frame","REAL"),  # snooker — trimmed mean
     ("avg_century_rate_median", "REAL"),    # snooker — diagnostic
     ("century_style",           "TEXT"),    # snooker — attacking/balanced/safety
@@ -268,9 +269,10 @@ class SnookerHistory:
             "n": n,
             "tier": _player_tier(total_n),
             "data_quality": _data_quality(total_n),
-            "frame_win_rate": fwr_weighted,
-            "avg_centuries_per_frame": rate_trimmed,
-            "avg_century_rate_median": rate_median,
+            "frame_win_rate":             fwr_weighted,
+            "avg_centuries_per_frame":    rate_trimmed,
+            "avg_century_rate_per_frame": rate_trimmed,
+            "avg_century_rate_median":    rate_median,
             "century_style": style,
             "form_trajectory": trajectory,
             "outlier_in_window": int(outlier),
@@ -300,13 +302,15 @@ def build_snooker_form(conn: sqlite3.Connection, dry_run: bool) -> int:
 
             if not dry_run:
                 _upsert_form(conn, pid, "snooker", date, form, {
-                    "avg_centuries_per_frame": form.get("avg_centuries_per_frame"),
-                    "avg_century_rate_median": form.get("avg_century_rate_median"),
-                    "century_style": form.get("century_style"),
-                    "form_trajectory": form.get("form_trajectory"),
-                    "outlier_in_window": form.get("outlier_in_window"),
-                    "player_tier": form.get("tier"),
-                    "data_quality": form.get("data_quality"),
+                    "frame_win_rate":            form.get("frame_win_rate"),
+                    "avg_centuries_per_frame":   form.get("avg_centuries_per_frame"),
+                    "avg_century_rate_per_frame":form.get("avg_century_rate_per_frame"),
+                    "avg_century_rate_median":   form.get("avg_century_rate_median"),
+                    "century_style":             form.get("century_style"),
+                    "form_trajectory":           form.get("form_trajectory"),
+                    "outlier_in_window":         form.get("outlier_in_window"),
+                    "player_tier":               form.get("tier"),
+                    "data_quality":              form.get("data_quality"),
                 })
             rows_written += 1
 
