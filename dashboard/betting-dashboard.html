@@ -803,22 +803,22 @@
           <div class="card-sub">4 with edge &gt; 5%</div>
         </div>
         <div class="card">
-          <div class="card-label">Tennis Matches</div>
-          <div class="card-value">5,632</div>
-          <div class="card-sub">ATP 2000–2025 ✓</div>
-          <div class="progress-wrap"><div class="progress-fill blue" style="width:100%"></div></div>
+          <div class="card-label">Tennis Today</div>
+          <div class="card-value blue">7</div>
+          <div class="card-sub">3 with edge &gt; 5%</div>
+          <div class="progress-wrap"><div class="progress-fill blue" style="width:43%"></div></div>
         </div>
         <div class="card">
-          <div class="card-label">Darts Matches</div>
-          <div class="card-value">1,230</div>
-          <div class="card-sub">PDC 2024–2025 ✓</div>
-          <div class="progress-wrap"><div class="progress-fill orange" style="width:100%"></div></div>
+          <div class="card-label">Darts Today</div>
+          <div class="card-value" style="color:var(--warn)">3</div>
+          <div class="card-sub">1 with edge &gt; 5%</div>
+          <div class="progress-wrap"><div class="progress-fill orange" style="width:33%"></div></div>
         </div>
         <div class="card">
-          <div class="card-label">Snooker Matches</div>
-          <div class="card-value">2,185</div>
-          <div class="card-sub">WST 2022–2025 ✓</div>
-          <div class="progress-wrap"><div class="progress-fill" style="width:100%"></div></div>
+          <div class="card-label">Snooker Today</div>
+          <div class="card-value yellow">2</div>
+          <div class="card-sub">0 with edge &gt; 5%</div>
+          <div class="progress-wrap"><div class="progress-fill" style="width:0%"></div></div>
         </div>
       </div>
 
@@ -833,7 +833,7 @@
             <tr>
               <th>Sport</th><th>Match</th><th>Market</th>
               <th>Model</th><th>Book</th><th>Edge</th>
-              <th>Kelly %</th><th>Mode</th><th>Action</th>
+              <th>Stake</th><th>Bookie</th><th>Mode</th><th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -843,9 +843,10 @@
               <td>Aces O/U 22.5</td>
               <td class="mono">26.1</td><td class="mono">22.5</td>
               <td class="mono edge-high">+12.4%</td>
-              <td class="mono edge-high">4.2%</td>
+              <td class="mono edge-high">£126</td>
+              <td><span class="status-pill pill-blue">Betfair</span></td>
               <td><span class="status-pill pill-paper" id="mode-tag-1">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Djokovic vs Alcaraz', 'OVER 22.5 Aces', 1.91)">CONFIRM</button></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Djokovic vs Alcaraz', 'OVER 22.5 Aces', 1.91, '£126', 'Betfair')">CONFIRM</button></td>
             </tr>
             <tr>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
@@ -853,9 +854,10 @@
               <td>Aces O/U 18.5</td>
               <td class="mono">15.2</td><td class="mono">18.5</td>
               <td class="mono edge-high">+8.1%</td>
-              <td class="mono edge-high">2.8%</td>
+              <td class="mono edge-high">£84</td>
+              <td><span class="status-pill pill-blue">Smarkets</span></td>
               <td><span class="status-pill pill-paper" id="mode-tag-2">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Sinner vs Zverev', 'UNDER 18.5 Aces', 1.88)">CONFIRM</button></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Sinner vs Zverev', 'UNDER 18.5 Aces', 1.88, '£84', 'Smarkets')">CONFIRM</button></td>
             </tr>
             <tr>
               <td><span class="sport-tag tag-darts">DARTS</span></td>
@@ -863,9 +865,10 @@
               <td>180s O/U 6.5</td>
               <td class="mono">9.2</td><td class="mono">6.5</td>
               <td class="mono edge-med">+6.7%</td>
-              <td class="mono edge-med">2.1%</td>
+              <td class="mono edge-med">£63</td>
+              <td><span class="status-pill pill-blue">Betfair</span></td>
               <td><span class="status-pill pill-paper" id="mode-tag-3">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'MVG vs Wright', 'OVER 6.5 180s', 1.95)">CONFIRM</button></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'MVG vs Wright', 'OVER 6.5 180s', 1.95, '£63', 'Betfair')">CONFIRM</button></td>
             </tr>
             <tr>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
@@ -873,9 +876,10 @@
               <td>Aces O/U 15.5</td>
               <td class="mono">17.8</td><td class="mono">15.5</td>
               <td class="mono edge-med">+5.3%</td>
-              <td class="mono edge-med">1.6%</td>
+              <td class="mono edge-med">£48</td>
+              <td><span class="status-pill pill-blue">Matchbook</span></td>
               <td><span class="status-pill pill-paper" id="mode-tag-4">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Medvedev vs Rublev', 'OVER 15.5 Aces', 1.91)">CONFIRM</button></td>
+              <td><button class="btn-confirm" onclick="confirmBet(this, 'Medvedev vs Rublev', 'OVER 15.5 Aces', 1.91, '£48', 'Matchbook')">CONFIRM</button></td>
             </tr>
           </tbody>
         </table>
@@ -1157,7 +1161,7 @@
         </div>
         <table>
           <thead>
-            <tr><th>Time</th><th>Sport</th><th>Match</th><th>Bet</th><th>Odds</th><th>Stake</th><th>Result</th><th>P&amp;L</th><th>Running</th></tr>
+            <tr><th>Time</th><th>Sport</th><th>Match</th><th>Bet</th><th>Odds</th><th>Stake</th><th>Bookie</th><th>Result</th><th>P&amp;L</th><th>Running</th></tr>
           </thead>
           <tbody id="perf-table-body">
             <!-- Populated by JS -->
@@ -1179,21 +1183,29 @@
         </div>
       </div>
 
+      <div class="period-tabs" style="margin-bottom:16px">
+        <button class="period-tab active" onclick="filterBetLog('all',   this)">ALL</button>
+        <button class="period-tab"        onclick="filterBetLog('tennis',  this)">TENNIS</button>
+        <button class="period-tab"        onclick="filterBetLog('darts',   this)">DARTS</button>
+        <button class="period-tab"        onclick="filterBetLog('snooker', this)">SNOOKER</button>
+      </div>
+
       <div class="table-wrap">
         <div class="table-header">
-          <div class="table-title">All Bets</div>
-          <span class="status-pill pill-green">+26.9u overall</span>
+          <div class="table-title" id="betlog-title">All Bets</div>
+          <span class="status-pill pill-green" id="betlog-summary">+£807 overall</span>
         </div>
         <table>
           <thead>
-            <tr><th>Date</th><th>Sport</th><th>Match</th><th>Bet</th><th>Edge</th><th>Stake</th><th>Odds</th><th>Mode</th><th>Result</th><th>P&amp;L</th></tr>
+            <tr><th>Date</th><th>Sport</th><th>Match</th><th>Bet</th><th>Edge</th><th>Stake</th><th>Odds</th><th>Bookie</th><th>Mode</th><th>Result</th><th>P&amp;L</th></tr>
           </thead>
           <tbody id="betlog-body">
             <tr>
               <td class="mono" style="color:var(--muted)">08 Mar</td>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
               <td class="mono">Djokovic/Alcaraz</td><td>Aces OVER 22.5</td>
-              <td class="mono edge-high">+12.4%</td><td class="mono">4.2u</td><td class="mono">1.91</td>
+              <td class="mono edge-high">+12.4%</td><td class="mono">£126</td><td class="mono">1.91</td>
+              <td><span class="status-pill pill-blue">Betfair</span></td>
               <td><span class="status-pill pill-paper">PAPER</span></td>
               <td><span class="status-pill pill-green">WIN</span></td>
               <td class="mono edge-high">+3.8u</td>
@@ -1202,7 +1214,8 @@
               <td class="mono" style="color:var(--muted)">07 Mar</td>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
               <td class="mono">Sinner/Zverev</td><td>Aces UNDER 18.5</td>
-              <td class="mono edge-high">+8.1%</td><td class="mono">2.8u</td><td class="mono">1.88</td>
+              <td class="mono edge-high">+8.1%</td><td class="mono">£84</td><td class="mono">1.88</td>
+              <td><span class="status-pill pill-blue">Smarkets</span></td>
               <td><span class="status-pill pill-paper">PAPER</span></td>
               <td><span class="status-pill pill-green">WIN</span></td>
               <td class="mono edge-high">+2.5u</td>
@@ -1211,7 +1224,8 @@
               <td class="mono" style="color:var(--muted)">06 Mar</td>
               <td><span class="sport-tag tag-darts">DARTS</span></td>
               <td class="mono">MVG/Wright</td><td>180s OVER 6.5</td>
-              <td class="mono edge-med">+6.7%</td><td class="mono">2.1u</td><td class="mono">1.95</td>
+              <td class="mono edge-med">+6.7%</td><td class="mono">£63</td><td class="mono">1.95</td>
+              <td><span class="status-pill pill-blue">Betfair</span></td>
               <td><span class="status-pill pill-paper">PAPER</span></td>
               <td><span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span></td>
               <td class="mono red">-2.1u</td>
@@ -1220,7 +1234,8 @@
               <td class="mono" style="color:var(--muted)">05 Mar</td>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
               <td class="mono">Medvedev/Rublev</td><td>Aces OVER 15.5</td>
-              <td class="mono edge-med">+5.3%</td><td class="mono">1.6u</td><td class="mono">1.91</td>
+              <td class="mono edge-med">+5.3%</td><td class="mono">£48</td><td class="mono">1.91</td>
+              <td><span class="status-pill pill-blue">Matchbook</span></td>
               <td><span class="status-pill pill-paper">PAPER</span></td>
               <td><span class="status-pill pill-green">WIN</span></td>
               <td class="mono edge-high">+1.5u</td>
@@ -1229,7 +1244,8 @@
               <td class="mono" style="color:var(--muted)">04 Mar</td>
               <td><span class="sport-tag tag-tennis">TENNIS</span></td>
               <td class="mono">Tsitsipas/Fritz</td><td>Aces OVER 17.5</td>
-              <td class="mono edge-high">+9.2%</td><td class="mono">3.1u</td><td class="mono">1.93</td>
+              <td class="mono edge-high">+9.2%</td><td class="mono">£93</td><td class="mono">1.93</td>
+              <td><span class="status-pill pill-blue">Betfair</span></td>
               <td><span class="status-pill pill-paper">PAPER</span></td>
               <td><span class="status-pill pill-green">WIN</span></td>
               <td class="mono edge-high">+2.9u</td>
@@ -1318,9 +1334,9 @@ function setMode(mode) {
 }
 
 // ── CONFIRM BET ──
-function confirmBet(btn, match, bet, odds) {
+function confirmBet(btn, match, bet, odds, stake, bookie) {
   const modeStr = currentMode === 'paper' ? '[PAPER] ' : '[LIVE] ';
-  const msg = `${modeStr}Place bet?\n\nMatch: ${match}\nBet: ${bet}\nOdds: ${odds}\n\n` +
+  const msg = `${modeStr}Place bet?\n\nMatch:  ${match}\nBet:    ${bet}\nOdds:   ${odds}\nStake:  ${stake || '—'}\nBookie: ${bookie || 'Sportmarket'}\n\n` +
               (currentMode === 'live' ? '⚠ This will place a REAL order via Sportmarket.' : 'Paper mode — no real bet placed.');
   if (confirm(msg)) {
     btn.textContent = '✓ PLACED';
@@ -1362,8 +1378,8 @@ const perfData = {
       { label: '14:20', wins: 1, losses: 0 },
     ],
     betsTable: [
-      { time: '14:20', sport: 'tennis', match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5', odds: '1.91', stake: '4.2u', result: 'WIN',  pnl: '+3.8u', running: '+3.8u' },
-      { time: '09:30', sport: 'tennis', match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5',odds: '1.88', stake: '2.8u', result: 'WIN',  pnl: '+2.5u', running: '+2.5u' },
+      { time: '14:20', sport: 'tennis', match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5',  odds: '1.91', stake: '£126', bookie: 'Betfair',  result: 'WIN',  pnl: '+£114', running: '+£114' },
+      { time: '09:30', sport: 'tennis', match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5', odds: '1.88', stake: '£84',  bookie: 'Smarkets', result: 'WIN',  pnl: '+£75',  running: '+£75'  },
     ],
   },
   week: {
@@ -1380,11 +1396,11 @@ const perfData = {
       { label: 'Fri', wins: 1, losses: 0 },
     ],
     betsTable: [
-      { time: '08 Mar', sport: 'tennis',  match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5',   odds: '1.91', stake: '4.2u', result: 'WIN',  pnl: '+3.8u', running: '+8.6u' },
-      { time: '07 Mar', sport: 'tennis',  match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5',  odds: '1.88', stake: '2.8u', result: 'WIN',  pnl: '+2.5u', running: '+4.8u' },
-      { time: '06 Mar', sport: 'darts',   match: 'MVG/Wright',        bet: '180s OVER 6.5',    odds: '1.95', stake: '2.1u', result: 'LOSS', pnl: '-2.1u', running: '+2.3u' },
-      { time: '05 Mar', sport: 'tennis',  match: 'Medvedev/Rublev',   bet: 'Aces OVER 15.5',   odds: '1.91', stake: '1.6u', result: 'WIN',  pnl: '+1.5u', running: '+4.4u' },
-      { time: '04 Mar', sport: 'tennis',  match: 'Tsitsipas/Fritz',   bet: 'Aces OVER 17.5',   odds: '1.93', stake: '3.1u', result: 'WIN',  pnl: '+2.9u', running: '+2.9u' },
+      { time: '08 Mar', sport: 'tennis',  match: 'Djokovic/Alcaraz', bet: 'Aces OVER 22.5',  odds: '1.91', stake: '£126', bookie: 'Betfair',  result: 'WIN',  pnl: '+£114', running: '+£258' },
+      { time: '07 Mar', sport: 'tennis',  match: 'Sinner/Zverev',    bet: 'Aces UNDER 18.5', odds: '1.88', stake: '£84',  bookie: 'Smarkets', result: 'WIN',  pnl: '+£75',  running: '+£144' },
+      { time: '06 Mar', sport: 'darts',   match: 'MVG/Wright',        bet: '180s OVER 6.5',   odds: '1.95', stake: '£63',  bookie: 'Betfair',  result: 'LOSS', pnl: '-£63',  running: '+£69'  },
+      { time: '05 Mar', sport: 'tennis',  match: 'Medvedev/Rublev',   bet: 'Aces OVER 15.5',  odds: '1.91', stake: '£48',  bookie: 'Matchbook',result: 'WIN',  pnl: '+£45',  running: '+£132' },
+      { time: '04 Mar', sport: 'tennis',  match: 'Tsitsipas/Fritz',   bet: 'Aces OVER 17.5',  odds: '1.93', stake: '£93',  bookie: 'Betfair',  result: 'WIN',  pnl: '+£87',  running: '+£87'  },
     ],
   },
   month: {
@@ -1547,6 +1563,7 @@ function renderPerformance(period) {
             <td>${b.bet}</td>
             <td class="mono">${b.odds}</td>
             <td class="mono">${b.stake}</td>
+            <td><span class="status-pill pill-blue" style="font-size:9px">${b.bookie || '—'}</span></td>
             <td>${resultEl}</td>
             <td class="mono ${isWin ? 'edge-high' : 'red'}">${b.pnl}</td>
             <td class="mono ${b.running.startsWith('+') ? 'edge-high' : 'red'}">${b.running}</td>
@@ -1641,6 +1658,27 @@ function drawBalanceChart(canvas, data, labels) {
       ctx.fillText(lbl, xOf(i), H - 6);
     }
   });
+}
+
+// ── BET LOG FILTER ──
+const allBetLogRows = () => document.querySelectorAll('#betlog-body tr');
+
+function filterBetLog(sport, btn) {
+  document.querySelectorAll('#page-bets .period-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+
+  allBetLogRows().forEach(row => {
+    if (sport === 'all') {
+      row.style.display = '';
+    } else {
+      const tag = row.querySelector('.sport-tag');
+      const rowSport = tag ? tag.textContent.trim().toLowerCase() : '';
+      row.style.display = rowSport === sport ? '' : 'none';
+    }
+  });
+
+  const titles = { all: 'All Bets', tennis: 'Tennis — Aces', darts: 'Darts — 180s', snooker: 'Snooker — Centuries' };
+  document.getElementById('betlog-title').textContent = titles[sport] || 'All Bets';
 }
 
 // ── INIT ──
