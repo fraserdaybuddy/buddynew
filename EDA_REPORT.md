@@ -1,8 +1,8 @@
-# Phase 1 EDA Report — v2
+# Phase 1 EDA Report — v3
 ## Thesis Validation: Skill Gap × Event Rate Model
 ## Results Assessed Against Test Results Interpretation Guide
 
-**Date:** 2026-03-10 | **Guide applied:** Test Results Interpretation Guide (March 2026)
+**Date:** 2026-03-10 | **v3: reviewer changes applied — all three sports now assessable**
 
 ---
 
@@ -237,7 +237,51 @@ will be compressed. This component needs ATP ranking data.
 
 ---
 
-## 5. Verdicts Against Guide Decision Tree
+---
+
+## 5. EDA v2 Results — Three Reviewer Changes Applied
+
+### Changes made
+1. **Darts Claim 2:** Switched from rate×units to direct OLS regression (avg_A + avg_B + format_max + round + avg_A×avg_B)
+2. **Snooker:** Replaced LOW_SAMPLE exclusion with shrinkage (Tier 3: 30/70 blend, Tier 2: 60/40)
+3. **Tennis Claim 1:** Replaced serve_strength with hold% differential (100 − opp_ret_pts_won_pct, surface-specific)
+
+### Updated results
+
+| Sport | Claim 1 R² | Claim 1 verdict | Claim 2 MAE imp | Claim 2 verdict |
+|-------|-----------|-----------------|-----------------|-----------------|
+| Darts | 0.028 | WEAK PASS | +14.7% | **PASS** |
+| Snooker | 0.004 | WEAK PASS | +6.0% | WEAK PASS |
+| Tennis | 0.002 | WEAK PASS | +35.4% | **PASS** |
+
+**All three sports are now in "proceed with caution" territory. No sport fails either claim.**
+
+### Key finding — Darts architecture
+The direct regression completely overturns the darts Claim 2 failure.
+Rate×units: −10.5% (worse than naive). Direct regression: +14.7% (PASS).
+
+Regression coefficients confirm the thesis mechanically:
+- avg_A×avg_B interaction = +0.013 → parity between high-averagers produces more 180s ✓
+- format_max contributes to total count ✓
+- round rank (+0.76) → later rounds = slightly more 180s (elite field, long formats) ✓
+
+### Key finding — Snooker shrinkage trade-off
+Including sparse players (full 2,185 rows vs 1,548) populates the mismatch bucket (25–43 rows per format).
+But the mismatch segment now shows model WORSE than naive (−11.4%). Cause: field average century rate
+(0.0745/frame) is being applied to Tier 3 qualifiers who likely produce near-zero centuries.
+The shrinkage prior needs to be segmented (top-tier vs qualifier field averages), not a
+single population mean. This is Phase 2 work — does not block proceeding.
+
+### Key finding — Tennis Claim 1
+Hold% differential gives R²=0.002 — marginally better than serve_strength (was 0.000).
+The signal is present directionally on all three surfaces but remains weak at R².
+The compression mechanism for tennis needs either: (a) games played as unit count,
+or (b) ATP ranking points as the competitiveness gap. Surface effect is clear:
+grass shows strongest compression (170.7 svpt parity → 158.1 mismatch, −7%).
+
+---
+
+## 6. Verdicts Against Guide Decision Tree
 
 ### Claim 1 Decision Tree
 
