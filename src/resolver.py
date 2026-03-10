@@ -102,6 +102,11 @@ class Resolver:
             ResolutionQueued  — confidence 0.80–0.94, queued for review
             ResolutionFailed  — confidence < 0.80, cannot resolve
         """
+        # Variables to hold deferred raise — must raise AFTER the with block
+        # so SQLite commits the writes before the exception propagates.
+        _raise_queued = None
+        _raise_failed = None
+
         with get_conn(self.db_path) as conn:
 
             # 1. Check alias table first (exact match on raw_name + source)
@@ -115,68 +120,79 @@ class Resolver:
                 if row["status"] == "ACCEPTED":
                     return row["player_id"]
                 elif row["status"] == "REJECTED":
-                    raise ResolutionFailed(
+                    _raise_failed = ResolutionFailed(
                         f"Name '{raw_name}' previously REJECTED for source '{source}'"
                     )
                 elif row["status"] == "PENDING":
-                    raise ResolutionQueued(
+                    _raise_queued = ResolutionQueued(
                         f"Name '{raw_name}' is in review queue (PENDING)"
                     )
 
-            # 2. Try to find best match in players table
-            players = conn.execute(
-                "SELECT player_id, full_name FROM players WHERE tour = ?",
-                (tour,),
-            ).fetchall()
-
-            if not players:
-                # No players exist yet — derive and create
-                return self._create_new_player(conn, raw_name, tour, source)
-
-            best_id = None
-            best_score = 0.0
-            for p in players:
-                score = similarity(raw_name, p["full_name"])
-                if score > best_score:
-                    best_score = score
-                    best_id = p["player_id"]
-
-            # 3. Route by confidence
-            if best_score >= CONFIDENCE_AUTO_ACCEPT:
-                self._write_alias(conn, raw_name, best_id, source, best_score, "ACCEPTED")
-                return best_id
-
-            elif best_score >= CONFIDENCE_QUEUE:
-                self._write_alias(conn, raw_name, best_id, source, best_score, "PENDING")
-                self._write_queue(conn, raw_name, best_id, best_score, source, context)
-                raise ResolutionQueued(
-                    f"Name '{raw_name}' queued for review "
-                    f"(best match: {best_id}, confidence: {best_score:.2f})"
-                )
+            if _raise_failed or _raise_queued:
+                pass  # exit with block cleanly so nothing to commit
 
             else:
-                # Could be a new player — derive ID and create
-                derived_id = name_to_player_id(tour, raw_name)
-                existing = conn.execute(
-                    "SELECT player_id FROM players WHERE player_id = ?",
-                    (derived_id,),
-                ).fetchone()
+                # 2. Try to find best match in players table
+                players = conn.execute(
+                    "SELECT player_id, full_name FROM players WHERE tour = ?",
+                    (tour,),
+                ).fetchall()
 
-                if existing:
-                    # ID collision — append numeric suffix
-                    i = 2
-                    while True:
-                        candidate = f"{derived_id}-{i}"
-                        if not conn.execute(
-                            "SELECT 1 FROM players WHERE player_id = ?", (candidate,)
-                        ).fetchone():
-                            derived_id = candidate
-                            break
-                        i += 1
+                if not players:
+                    # No players exist yet — derive and create
+                    return self._create_new_player(conn, raw_name, tour, source)
 
-                return self._create_new_player(
-                    conn, raw_name, tour, source, player_id=derived_id
-                )
+                best_id = None
+                best_score = 0.0
+                for p in players:
+                    score = similarity(raw_name, p["full_name"])
+                    if score > best_score:
+                        best_score = score
+                        best_id = p["player_id"]
+
+                # 3. Route by confidence
+                if best_score >= CONFIDENCE_AUTO_ACCEPT:
+                    self._write_alias(conn, raw_name, best_id, source, best_score, "ACCEPTED")
+                    return best_id
+
+                elif best_score >= CONFIDENCE_QUEUE:
+                    # Write BEFORE raising — raise after with block commits
+                    self._write_alias(conn, raw_name, best_id, source, best_score, "PENDING")
+                    self._write_queue(conn, raw_name, best_id, best_score, source, context)
+                    _raise_queued = ResolutionQueued(
+                        f"Name '{raw_name}' queued for review "
+                        f"(best match: {best_id}, confidence: {best_score:.2f})"
+                    )
+
+                else:
+                    # Could be a new player — derive ID and create
+                    derived_id = name_to_player_id(tour, raw_name)
+                    existing = conn.execute(
+                        "SELECT player_id FROM players WHERE player_id = ?",
+                        (derived_id,),
+                    ).fetchone()
+
+                    if existing:
+                        # ID collision — append numeric suffix
+                        i = 2
+                        while True:
+                            candidate = f"{derived_id}-{i}"
+                            if not conn.execute(
+                                "SELECT 1 FROM players WHERE player_id = ?", (candidate,)
+                            ).fetchone():
+                                derived_id = candidate
+                                break
+                            i += 1
+
+                    return self._create_new_player(
+                        conn, raw_name, tour, source, player_id=derived_id
+                    )
+
+        # Raise deferred exceptions AFTER with block has committed
+        if _raise_queued:
+            raise _raise_queued
+        if _raise_failed:
+            raise _raise_failed
 
     def _create_new_player(
         self,
