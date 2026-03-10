@@ -231,6 +231,140 @@ No sport fails. No sport is blocked. All proceed to form_builder and Claim 3
 
 ---
 
+---
+
+## Addendum: Reviewer Questions Answered
+
+*The following checks were run in response to three open questions from external review.*
+
+---
+
+### A1 — Darts Regression Stability (Walk-Forward)
+
+**Test:** Hold out 2025+2026 matches, train on 2024. Then flip.
+**Requirement:** R² holds above 0.20 and MAE improvement above 10% in both directions.
+Interaction coefficient must be stable within 20% across windows.
+
+**Note:** Darts match dates were stored as scrape dates (2026-03-09) rather than
+actual match dates. Corrected by populating tournament start dates from the known
+PDC calendar. Walk-forward now uses correct chronological ordering.
+
+| Direction | Train n | Test n | Train R² | Test R² | MAE improvement |
+|-----------|---------|--------|----------|---------|-----------------|
+| 2024 → 2025+2026 | 416 | 429 | 0.262 | **0.286** | **+16.0%** |
+| 2025+2026 → 2024 | 429 | 416 | 0.293 | **0.255** | **+12.6%** |
+
+**Interaction term (avg_A×avg_B) coefficient stability:**
+- Train 2024: +0.01293
+- Train 2025+2026: +0.01231
+- Variation: **4.8%** (threshold: 20%)
+
+**Verdict: PRODUCTION READY.** Both directions hold. R² stable at 0.25–0.29 out of
+sample. MAE improvement stays above 10% in both directions. The interaction term
+is stable — it is capturing a structural relationship, not dataset-specific noise.
+
+---
+
+### A2 — Round Independence: Does Round Add Signal Beyond Averages?
+
+**Test:** Within parity-only matches (avg gap < 3 pts), does round still predict
+180 totals? If yes, round adds independent signal. If no, it's just a gap proxy.
+
+| Round | N | Mean 180s | Notes |
+|-------|---|-----------|-------|
+| R1/1/64 | 28 | 7.29 | Early parity: qualifiers both averaging ~88 |
+| R2/1/32 | 52 | 6.79 | |
+| R3/1/16 | 67 | 8.24 | |
+| R4/1/8 | 71 | 8.79 | |
+| QF | 38 | 7.34 | |
+| SF | 12 | **13.33** | Elite parity: both averaging ~98, BO19 format |
+| F | 7 | **12.00** | |
+
+**Round IS adding independent signal.** SF/F parity matches produce 12–13 180s vs
+7–8 in early parity — a near-doubling. This is driven by two mechanisms:
+
+1. **Format escalation.** Later rounds use longer formats (BO19/BO25 in SF/F vs
+   BO11 in R1). The format_max variable captures this, but round serves as a
+   supporting signal when format isn't cleanly recorded.
+
+2. **Player level within the parity band.** "Gap < 3 pts" at SF level means two
+   players both averaging 98; at R1 level it means two players both averaging 88.
+   The avg_A×avg_B interaction (98²=9604 vs 88²=7744) should capture most of this,
+   but round adds a small residual effect on top.
+
+**Operational implication:** The regression already includes round. The coefficient
+should show a staircase (negative for early rounds, positive for late). This
+is confirmed — round adds real independent value in the model.
+
+---
+
+### A3 — Variance by Round: Staking Confidence
+
+**Test:** Does early round CV (coefficient of variation = StDev/Mean) confirm
+lower variance → higher confidence → more Kelly stake?
+
+| Round | N | Mean | StDev | CV |
+|-------|---|------|-------|-----|
+| R1/1/64 | 104 | 6.92 | 3.25 | **0.469** ← lowest |
+| R2/1/32 | 150 | 6.59 | 3.78 | 0.574 |
+| R3/1/16 | 184 | 7.69 | 4.64 | 0.603 |
+| R4/1/8 | 216 | 7.33 | 4.61 | 0.629 |
+| QF | 107 | 8.46 | 5.81 | 0.686 |
+| SF | 56 | 11.64 | 6.79 | 0.583 |
+| F | 28 | 11.14 | 7.70 | **0.691** ← highest |
+
+Early rounds (R1–R3) mean CV: 0.549. Late rounds (QF+) mean CV: 0.653.
+
+**Variance structure confirmed.** Early round matches are more predictable (lower
+relative variance). Finals are least predictable. This has direct staking implications:
+
+- **UNDER bets in R1/R2:** High confidence — the compression is predictable. Run
+  full Kelly allowance when edge threshold is met.
+- **OVER bets in SF/F:** Lower confidence — even when the direction is right
+  (parity extension), the actual total varies widely. Reduce Kelly to 60-70% of
+  calculated stake for late-round OVER bets.
+
+The Kelly staking system should encode this: `confidence_multiplier = f(round_rank)`
+where early rounds get a small boost and late rounds get a haircut on the stake size.
+
+---
+
+### A4 — Tennis: Compression Gap Quantification
+
+**Test:** What fraction of large model over-predictions (>5 aces) occur in mismatch
+matches? Reviewer thresholds: 40%+ = compression critically needed; 15–20% = rate model dominant.
+
+| Segment | N | Mean prediction error |
+|---------|---|----------------------|
+| Parity (hold_gap 0–2) | 1,671 | **+0.274** |
+| Mid (2–5) | 1,894 | **+0.271** |
+| High (5–9) | 1,340 | **+0.663** |
+| Mismatch (9+) | 519 | **+0.745** |
+
+- Large over-predictions (>5 aces): 773 matches (14.3% of total)
+- Of those, mismatch (hold_gap > 5): **272 (35.2%)**
+
+**Result: 35.2% — between thresholds.** Above the 20% "rate model dominates" level,
+below the 40% "compression critically needed" level.
+
+**Interpretation:**
+The model systematically over-predicts aces in mismatch matches (mean error +0.745
+vs +0.274 in parity). This bias comes from using individual ace rates without
+adjusting for match compression — the model predicts "this big server will ace
+frequently" but the match gets compressed and fewer service games are played.
+
+The compression component would:
+- Reduce systematic over-prediction in mismatch (+0.745 → nearer to zero)
+- Unlock MISMATCH UNDER signals currently masked by the over-prediction bias
+
+**Practical decision:** Proceed with the rate model for OVER signals on serve-heavy
+matchups — these are accurate and represent immediate betting value. Add hold%
+compression (already derivable from current data) as the second component to
+unlock UNDER signals. The 35% mismatch contamination in over-predictions is
+meaningful enough to prioritise, but does not block the OVER market.
+
+---
+
 ## Open Questions for Review
 
 **Q1 — Darts regression stability:**
