@@ -798,9 +798,9 @@
 
       <div class="grid-4">
         <div class="card card-accent">
-          <div class="card-label">Total Matches</div>
-          <div class="card-value">9,047</div>
-          <div class="card-sub">across 3 sports</div>
+          <div class="card-label">Today's Matches</div>
+          <div class="card-value">12</div>
+          <div class="card-sub">4 with edge &gt; 5%</div>
         </div>
         <div class="card">
           <div class="card-label">Tennis Matches</div>
@@ -1108,7 +1108,7 @@
         </div>
         <div style="display:flex; gap:8px; align-items:center">
           <span class="status-pill pill-paper" id="perf-mode-tag">PAPER</span>
-          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px" id="perf-bankroll">Bank: +14.7u</span>
+          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px" id="perf-bankroll">Bank: £3,441</span>
         </div>
       </div>
 
@@ -1128,7 +1128,7 @@
 
       <!-- Balance curve -->
       <div class="chart-wrap">
-        <div class="chart-title">Bankroll Curve (units)</div>
+        <div class="chart-title">Bankroll Curve (GBP)</div>
         <canvas id="balance-chart" height="160"></canvas>
       </div>
 
@@ -1175,7 +1175,7 @@
         </div>
         <div style="display:flex; gap:8px">
           <span class="status-pill pill-paper" id="betlog-mode-tag">PAPER</span>
-          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px">Bank: +14.7 units</span>
+          <span class="status-pill pill-green" style="font-size:11px; padding:5px 12px">Bank: £3,441</span>
         </div>
       </div>
 
@@ -1246,6 +1246,10 @@
 // ── STATE ──
 let currentMode = 'paper';  // 'paper' | 'live'
 let currentPeriod = 'day';
+const BANKROLL = 3000;  // Starting bankroll in GBP — change here only
+const u2gbp = u => Math.round(u / 100 * BANKROLL);
+const fmt = v => '£' + Math.abs(v).toLocaleString('en-GB');
+const fmtPnl = v => (v >= 0 ? '+£' : '-£') + Math.abs(Math.round(v / 100 * BANKROLL)).toLocaleString('en-GB');
 
 // ── NAVIGATION ──
 function showPage(id, el) {
@@ -1447,7 +1451,7 @@ function renderPerformance(period) {
   document.getElementById('perf-cards').innerHTML = `
     <div class="card ${pnlPos ? 'card-accent' : 'card-red'}">
       <div class="card-label">P&amp;L</div>
-      <div class="card-value" style="color:${pnlPos ? 'var(--accent)' : 'var(--red)'}">${pnlPos?'+':''}${d.pnl.toFixed(1)}u</div>
+      <div class="card-value" style="color:${pnlPos ? 'var(--accent)' : 'var(--red)'}">${fmtPnl(d.pnl)}</div>
       <div class="card-sub">${period === 'day' ? 'today' : period === 'week' ? 'this week' : period === 'month' ? 'this month' : period === 'ytd' ? 'year to date' : 'all time'}</div>
     </div>
     <div class="card">
@@ -1462,8 +1466,8 @@ function renderPerformance(period) {
     </div>
     <div class="card">
       <div class="card-label">Bankroll</div>
-      <div class="card-value" style="color:var(--accent)">${d.bank.toFixed(1)}u</div>
-      <div class="card-sub">from 100u starting</div>
+      <div class="card-value" style="color:var(--accent)">${fmt(u2gbp(d.bank))}</div>
+      <div class="card-sub">from ${fmt(BANKROLL)} starting</div>
     </div>
     <div class="card">
       <div class="card-label">Mode</div>
@@ -1626,7 +1630,7 @@ function drawBalanceChart(canvas, data, labels) {
   ctx.font = '10px IBM Plex Mono, monospace';
   ctx.textAlign = 'right';
   [minV, (minV + maxV) / 2, maxV].forEach(v => {
-    ctx.fillText(v.toFixed(0) + 'u', pad.left - 6, yOf(v) + 4);
+    ctx.fillText('£' + u2gbp(v).toLocaleString('en-GB'), pad.left - 6, yOf(v) + 4);
   });
 
   // X-axis labels
