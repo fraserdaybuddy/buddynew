@@ -1,0 +1,780 @@
+**Test Results Interpretation Guide**
+
+What to Look For, What it Means, What Kills the Thesis
+
+JOB-006 Sports Betting Intelligence System
+
+March 2026 \| Covers Phase 1 Claims 1--3 + Phase 2 Backtest
+
+Applies to: Darts (180s), Snooker (Centuries), Tennis (Aces)
+
+1\. How to Read This Document
+
+This guide tells you exactly what patterns to look for when you run each
+test in the Phase 1 validation ladder. For every test, it defines what a
+passing result looks like, what a failing result looks like, and what
+ambiguous results mean. It also maps the cross-sport patterns you should
+expect if the thesis holds --- and the warning signs that suggest you
+are fooling yourself.
+
+The document follows the same test sequence as the Model Strategy and
+Analytics Testing Framework. Run the tests in order. Do not skip ahead.
+A failure at any step must be diagnosed before proceeding.
+
+> **Key Principle**
+>
+> You are looking for the SAME structural pattern across all three
+> sports.
+>
+> If mismatch compression works in tennis but not darts, the thesis is
+> sport-specific, not structural.
+>
+> A structural edge means the effect repeats wherever the
+> opportunity/rate decomposition applies.
+
+2\. Claim 1 --- Skill Gap Predicts Opportunity Count
+
+This is the foundation. If skill gap does not predict how many units are
+played, nothing else matters. You are testing whether bigger mismatches
+produce shorter matches.
+
+2.1 What You Are Measuring
+
+For each sport, run a regression of units played against absolute skill
+gap, controlling for format:
+
+-   **Darts:** legs_played \~ \|avg_differential\| + format (BO11 / BO13
+    / BO19)
+
+-   **Snooker:** frames_played \~ \|frame_win_rate_diff\| + format (BO9
+    / BO17 / BO35)
+
+-   **Tennis:** service_games \~ \|serve_strength_diff\| + format (BO3 /
+    BO5) + surface
+
+2.2 Patterns That Confirm the Thesis
+
+The Core Signal: Negative Slope
+
+The coefficient on absolute_skill_gap must be negative and statistically
+significant (p \< 0.05). This means: as the gap between players widens,
+fewer units are played. This is the entire compression mechanism.
+
+What the Scatter Plot Should Look Like
+
+-   **Left side (small gaps):** Wide vertical spread. Close matches are
+    unpredictable --- some go the distance, some don't. This variance is
+    expected and healthy.
+
+-   **Right side (large gaps):** Tighter cluster, shifted downward.
+    Mismatches compress consistently. The ceiling drops. You should
+    rarely see a 20-leg match when the average gap is 15+ points in
+    darts.
+
+-   **Shape:** A funnel that narrows and drops from left to right. Not a
+    flat band, not a random cloud.
+
+Effect Size Expectations
+
+  ---------------- --------------- --------------------- -----------------
+  **Sport**        **Gap Size**    **Expected Unit       **Notes**
+                                   Reduction**           
+
+  Darts            10+ pt avg gap  2--4 fewer legs vs    BO11: expect
+                                   close matches         \~7--8 legs vs
+                                                         \~10--11
+
+  Snooker          Top 10 vs 50+   3--5 fewer frames     BO17: expect
+                                                         \~10--12 vs
+                                                         \~15--17
+
+  Tennis           200K+ pts gap   4--8 fewer service    Surface
+                                   games                 amplifies: grass
+                                                         \> hard \> clay
+  ---------------- --------------- --------------------- -----------------
+
+Cross-Sport Consistency
+
+The single most important validation check: does the compression effect
+appear in all three sports? You should see:
+
+-   **Same direction:** Negative coefficient in all three regressions.
+    No exceptions.
+
+-   **Similar R² range:** Skill gap should explain 15--35% of variance
+    in units played across all sports. If one sport shows R² \< 0.05,
+    the thesis is weak there.
+
+-   **Format interaction:** Longer formats amplify the effect. A
+    mismatch in BO19 darts compresses by more absolute legs than the
+    same mismatch in BO11. If longer formats show no additional
+    compression, the model loses a key lever.
+
+2.3 Patterns That Kill the Thesis
+
+> **STOP Signal --- Claim 1 Failure**
+>
+> Flat or positive slope: gap has no relationship to units played, or
+> larger gaps produce MORE units.
+>
+> This kills the entire model. Do not proceed to Claim 2. Investigate
+> the skill gap metric itself.
+
+-   **Flat slope (coefficient near zero):** Skill gap does not predict
+    match length. The thesis assumes compression --- if it doesn't
+    exist, there is no MISMATCH UNDER signal. Possible cause: your skill
+    gap metric is poorly defined. Try a different proxy (Layer 2
+    composite instead of Layer 1).
+
+-   **Positive slope:** Bigger gaps produce LONGER matches. This would
+    be bizarre but must be flagged. Likely cause: data error, reversed
+    sign, or the gap metric is measuring something other than dominance.
+
+-   **Works in one sport only:** If tennis shows clear compression but
+    darts and snooker don't, the thesis is not structural --- it's a
+    tennis-specific pattern. Pause the failing sports. Continue the
+    passing sport alone but acknowledge the thesis is narrower than
+    claimed.
+
+2.4 Ambiguous Results --- What to Investigate
+
+-   **Significant but weak (R² \< 0.10):** The effect exists but
+    explains very little variance. This is borderline. The model may
+    still work if the small effect is consistent and not priced by the
+    market, but your edge will be thin and fragile. Proceed with caution
+    --- tighten edge thresholds to 8%+ minimum.
+
+-   **Significant only in long formats:** Compression only appears in
+    BO17+/BO5 but not in short formats. This is actually plausible ---
+    short formats have less room for compression. Restrict the model to
+    long formats only and see if Claim 2 still holds.
+
+-   **Non-linear relationship:** The effect kicks in only above a
+    certain gap threshold (e.g., 12+ points in darts). Below that, no
+    compression. This is fine --- it just means your MISMATCH_THRESHOLD
+    needs to be set at that inflection point. Use a LOESS curve or
+    segmented regression to find the knee.
+
+3\. Claim 2 --- Units × Rate Beats Naive Average
+
+This tests whether decomposing the prediction into two components
+(expected units × event rate per unit) actually predicts totals better
+than just using a player's season average total. If the decomposition
+adds no value, the model is unnecessary complexity.
+
+3.1 What You Are Comparing
+
+For every match in your dataset, compute two predictions:
+
+-   **Naive baseline:** Player A's season average total events + Player
+    B's season average total events. No adjustment for opponent, format,
+    or context.
+
+-   **Model prediction:** Expected units played (from Claim 1
+    regression) × each player's event rate per unit. Context-aware.
+
+Then compare: which prediction has lower mean absolute error (MAE)
+against actual outcomes?
+
+3.2 Patterns That Confirm the Thesis
+
+The Model Wins on MAE
+
+The decomposed model should produce lower MAE than the naive average. By
+how much matters:
+
+  ----------------- ------------------------------- ----------------------
+  **Improvement**   **Interpretation**              **Action**
+
+  MAE drops 15%+    Strong signal. Decomposition    Proceed confidently to
+                    adds real predictive power.     Claim 3.
+
+  MAE drops 8--15%  Moderate signal. The model      Proceed, but expect
+                    helps but the edge is thinner.  smaller edges vs
+                                                    market.
+
+  MAE drops 3--8%   Weak signal. Marginal           Proceed cautiously.
+                    improvement.                    May not survive market
+                                                    friction.
+
+  MAE drops \< 3%   Negligible. Model adds no       Stop. Investigate ---
+                    meaningful value.               see failure patterns
+                                                    below.
+  ----------------- ------------------------------- ----------------------
+
+Where the Model Should Win Most
+
+The improvement should not be uniform. It should be largest in exactly
+the scenarios your thesis predicts:
+
+-   **High-mismatch matches:** This is where naive averages are most
+    wrong. A player who averages 8 aces per match will produce far fewer
+    against a dominant opponent in a 3-set blowout. The naive average
+    misses this. Your model should capture it. If the MAE improvement
+    disappears in mismatch matches, the decomposition is not doing its
+    job.
+
+-   **Long-format parity matches:** Two elite players in a BO5 or BO17+
+    produce more units than average. The naive model underestimates
+    totals here. Your model should catch the extended match driving
+    extra events.
+
+-   **Cross-surface in tennis:** A player who averages 10 aces overall
+    but plays on grass (where aces spike) and clay (where they drop)
+    should be better predicted by the surface-specific rate than the
+    blended average.
+
+Residual Pattern You Want to See
+
+Plot residuals (actual − predicted) against skill gap. For the naive
+model, residuals should be systematically negative at high gaps (it
+overpredicts mismatches) and positive at low gaps (it underpredicts
+parity). For your model, residuals should be centered around zero across
+all gap levels --- the bias is removed.
+
+3.3 Patterns That Kill the Thesis
+
+> **STOP Signal --- Claim 2 Failure**
+>
+> Naive average beats the model, or ties it, across all segments.
+>
+> This means decomposition adds no predictive value. The model is
+> pointless.
+
+-   **Naive wins everywhere:** If season averages predict just as well,
+    the market already accounts for match context implicitly. There is
+    no informational edge in decomposing. This is a thesis failure, not
+    a data failure.
+
+-   **Model wins overall but loses on mismatches:** If the model only
+    improves predictions on close matches (where both players play near
+    their average anyway), the compression thesis specifically is not
+    validated. The model is adding value through some other mechanism.
+
+-   **Model has lower MAE but higher variance:** If the model's errors
+    are smaller on average but more wildly distributed (higher standard
+    deviation of residuals), it's unstable. A betting model needs
+    consistent prediction, not occasional brilliance offset by
+    occasional disasters.
+
+3.4 Ambiguous Results
+
+-   **Model wins in 2 of 3 sports:** This is workable. Proceed with the
+    passing sports. Investigate why the third fails --- likely a data
+    quality issue or a poorly calibrated skill gap metric for that
+    sport.
+
+-   **Model wins on UNDER predictions but not OVER:** The compression
+    signal is real but the extension signal is not. This means MISMATCH
+    UNDER bets are valid but PARITY OVER bets should be deprioritised or
+    suspended until further evidence.
+
+-   **Improvement varies wildly by time period:** Model wins strongly in
+    2024 but not 2023. This suggests overfitting to recent patterns or a
+    structural market change. Run a walk-forward split to check
+    stability.
+
+4\. Claim 3 --- Prediction Diverges from Market Line
+
+This is the money question. Even if your model predicts well, the market
+may already know everything you know. Claim 3 tests whether your model's
+probability estimates diverge enough from market-implied probabilities
+to generate a betting edge.
+
+4.1 What You Are Measuring
+
+For every match where you have both a model prediction and a real market
+line:
+
+-   **Model probability:** From your simulation, the percentage of runs
+    where the total falls under (or over) the market line.
+
+-   **Market implied probability:** Derived from the decimal odds. For
+    odds of 1.85 on Under: implied_p = 1/1.85 = 54.1% (before vig
+    removal).
+
+-   **Edge:** model_p − market_implied_p. Positive = model thinks the
+    outcome is more likely than the market does.
+
+4.2 Patterns That Confirm the Thesis
+
+Systematic Directional Divergence
+
+You should see the model consistently assigning higher probabilities
+than the market in specific, predictable scenarios:
+
+-   **Mismatch matches:** Model p_under should be higher than market
+    implied p_under. The market underestimates how much the match
+    compresses. This is your primary edge source.
+
+-   **Parity + long format:** Model p_over should be higher than market
+    implied p_over. The market underestimates how much the match
+    extends.
+
+If these divergences are random (sometimes model is higher, sometimes
+lower, with no pattern), there is no systematic edge.
+
+Edge Distribution Shape
+
+Plot a histogram of edge values across all matches. What you want to
+see:
+
+-   **Centered slightly above zero:** Most matches show a small positive
+    edge (2--4%). The market is approximately efficient most of the
+    time.
+
+-   **Fat right tail:** A meaningful minority of matches (15--25%) show
+    edges above 5%. These are your betting candidates. They should
+    cluster in mismatch and parity scenarios.
+
+-   **Thin left tail:** Very few matches where the model says the market
+    is dramatically right and you are wrong. If the left tail is as fat
+    as the right, the model is just noisy, not insightful.
+
+Edge by Segment
+
+  ------------------------ --------------------- -------------------------
+  **Segment**              **Expected Edge**     **If Not Seen**
+
+  Mismatch + early round   Largest edges         Primary thesis failure
+                           (8--15%)              
+
+  Parity + late round +    Moderate edges        Secondary signal absent
+  long format              (5--10%)              
+
+  Mid-range gap, any stage Near zero edge        Expected --- no bet
+                                                 territory
+
+  Random / no-signal       Slightly negative or  Market is efficient here
+  matches                  zero                  
+  ------------------------ --------------------- -------------------------
+
+4.3 Patterns That Kill the Thesis
+
+> **STOP Signal --- Claim 3 Failure**
+>
+> No systematic divergence. Edge distribution centered at zero with no
+> directional pattern.
+>
+> The market already prices what your model knows. There is no
+> exploitable inefficiency.
+
+-   **Edge is random noise:** If mismatch matches show the same average
+    edge as random matches, the market already accounts for compression.
+    Your model is correct but redundant.
+
+-   **Edges only appear with synthetic lines:** If you pass Claim 3
+    using population median as a proxy line but fail when real Betfair
+    lines are introduced, the market is sharper than your proxy assumed.
+    This is the most likely failure mode. Real market lines are set by
+    sophisticated bettors who already model these dynamics.
+
+-   **Edges are large but unprofitable when bet:** If edges of 10%+ show
+    a win rate below 50%, the model's probability estimates are
+    miscalibrated. The model thinks it sees value but its probability
+    mapping is wrong. Go back to calibration.
+
+4.4 The Synthetic Line Warning
+
+> **Critical Caveat**
+>
+> If you are testing Claim 3 with population median as a synthetic line
+> (because real Betfair data is not yet imported),
+>
+> any PASS is PROVISIONAL ONLY. You MUST re-test with real closing odds
+> before proceeding to backtest.
+>
+> Real market lines are tighter. Expect 30--50% of synthetic-line edges
+> to vanish against real odds.
+
+5\. Cross-Sport Patterns --- Similarities, Trends, and Opposites
+
+The thesis claims a structural pattern that repeats across sports. Here
+is what structural consistency looks like versus sport-specific noise.
+
+5.1 What Should Be the Same Across All Sports
+
+Direction of Compression
+
+In every sport, bigger skill gaps must produce fewer opportunity units.
+If darts shows compression but snooker shows expansion under mismatch,
+one of them is wrong. The direction must be unanimous.
+
+Mismatch Underprediction by Markets
+
+If markets underprice compression in tennis aces, they should also
+underprice it in darts 180s and snooker centuries. The market blindspot
+is structural: books focus on match winner odds and treat stat totals as
+secondary. This blindspot should be consistent across sports.
+
+Format Amplification
+
+Longer formats should amplify both signals in all sports. BO19 darts
+should show bigger compression than BO11. BO5 tennis should show more
+parity extension than BO3. BO35 snooker should show more extreme effects
+than BO9. If any sport shows the opposite (longer format = weaker
+effect), investigate that sport's format data.
+
+Stage Alignment
+
+Early round mismatches should produce the clearest UNDER signals
+(because early rounds have the widest skill gaps). Late-stage parity
+should produce the clearest OVER signals (because only elite players
+remain). This tournament structure effect should appear in all three
+sports.
+
+5.2 What Should Be Different Across Sports
+
+Magnitude of Compression
+
+The absolute size of the effect will differ. Tennis has more granular
+units (service games vs legs vs frames) and more matches in the dataset.
+Expect:
+
+-   **Tennis:** Strongest statistical signal. Largest dataset. Most
+    measurable compression. Most formats and surfaces to slice by.
+
+-   **Darts:** Moderate signal. Fewer matches, but the 180s-per-leg rate
+    is highly variable, which creates larger edges when the model is
+    right.
+
+-   **Snooker:** Weakest initial signal. Centuries are rare events
+    (Poisson-like), so variance is inherently high. Small sample sizes
+    per profile cell. Expect wider confidence intervals and lower
+    statistical significance.
+
+Which Signal Dominates
+
+The balance between MISMATCH UNDER and PARITY OVER will differ by sport:
+
+-   **Darts:** MISMATCH UNDER should dominate. Large average
+    differentials in early rounds are common. Parity at the top is rarer
+    because the PDC field has a steeper skill gradient.
+
+-   **Tennis:** Both signals should be roughly balanced. Grand Slams
+    produce deep parity (BO5, all top players present) and early-round
+    mismatches (qualifiers vs seeds).
+
+-   **Snooker:** PARITY OVER may be stronger. The WST tour is top-heavy
+    --- many late-stage matches feature top 16 players, and longer
+    formats (BO17, BO35) create extended century opportunities.
+
+Surface and Venue Effects
+
+Only tennis has surface as a variable. But all three sports have
+venue/event effects:
+
+-   **Tennis:** Grass amplifies aces per service game. Clay suppresses
+    them. Expect the model to perform best on grass and worst on clay.
+
+-   **Darts:** All matches on the same boards. No surface effect. But
+    Premier League (weekly format, smaller field) may behave differently
+    from World Championship (single elimination, huge field).
+
+-   **Snooker:** The Crucible (World Championship) has famously
+    different table conditions. Track whether Crucible results are an
+    outlier.
+
+6\. Red Flags --- Signs You Are Fooling Yourself
+
+The biggest risk in model building is not that the thesis fails --- it's
+that you convince yourself it works when it doesn't. These are the
+specific patterns that indicate self-deception.
+
+6.1 Results Too Good to Be True
+
+  --------------- --------------- ------------------ ----------------------
+  **Metric**      **Suspicious    **Realistic        **If Suspicious**
+                  Range**         Range**            
+
+  Win rate        \> 70%          55--65%            Check for look-ahead
+                                                     bias in form data
+
+  ROI             \> 25%          8--18%             Check if odds are
+                                                     closing odds not
+                                                     opening
+
+  Max drawdown    \< 5%           10--20%            You are probably
+                                                     filtering out losses
+
+  Zero losing     Never happens   Should see 4--6    Data error or
+  streaks \> 3                    run losses         survivorship bias
+
+  All sports      In Phase 1      1--2 sports        Overfitting signal
+  profitable                      profitable         across all three
+  --------------- --------------- ------------------ ----------------------
+
+6.2 Asymmetric Evidence Handling
+
+-   **Explaining away failures:** If you find yourself adding caveats
+    ("well, that tournament was unusual", "that player had an injury")
+    to excuse failures but not applying the same scepticism to
+    successes, you are cherry-picking. Apply the same exclusion criteria
+    uniformly before looking at results.
+
+-   **Optimising thresholds after seeing results:** If you set
+    MISMATCH_THRESHOLD at 10 points, test, get a bad result, change it
+    to 12, retest and get a good result --- that is curve fitting. Set
+    thresholds BEFORE testing. If you must adjust, re-test on a held-out
+    sample.
+
+-   **Segment shopping:** If you slice the data by sport, format, stage,
+    surface, year, and signal type, some segments will look profitable
+    by random chance alone. With 50+ segments, expect 2--3 to show p \<
+    0.05 purely by chance. Require the signal to appear in the aggregate
+    first, then check segments for consistency.
+
+6.3 Data Quality Masquerading as Signal
+
+-   **Survivorship in form data:** If player form is only computed for
+    players with 10+ matches, you are systematically excluding
+    qualifiers and low-ranked players from mismatch analysis. These are
+    exactly the matches where the thesis should work best. Check that
+    your dataset includes the full range of skill gaps.
+
+-   **Closing odds bias:** If you test against closing odds (final price
+    before match starts), your model had access to the same information
+    the market had at open. The real test is: does the model find edge
+    at the time you would actually bet (usually hours before start)?
+    Test against opening odds or morning-of odds where possible.
+
+-   **NULL stats mishandled:** If NULL 180s or NULL centuries were
+    accidentally treated as 0 during analysis, mismatch matches (where
+    the weaker player often has missing data) will show artificially low
+    totals. This creates a fake compression signal. Verify NULLs are
+    excluded, never converted to zeros.
+
+7\. Negative Results --- What Failure Actually Looks Like
+
+Not all failures kill the project. Some narrow the scope. Some redirect
+effort. Here is a taxonomy of failure modes and what to do with each.
+
+7.1 Thesis Failures (Major)
+
+  ------------------- --------------------------- -----------------------
+  **Failure**         **What It Means**           **Action**
+
+  No compression in   Skill gap does not shorten  Thesis is dead. Pivot
+  any sport           matches                     to a different edge
+                                                  mechanism.
+
+  Compression exists  Model is correct but        Edge thesis fails.
+  but market prices   redundant                   Model has research
+  it                                              value but no betting
+                                                  value.
+
+  Model probabilities Edge exists on paper, loses Calibration failure.
+  are miscalibrated   money                       Fixable. Recalibrate
+                                                  and re-test.
+  ------------------- --------------------------- -----------------------
+
+7.2 Scope Narrowing (Moderate)
+
+  --------------------- ------------------------- -----------------------
+  **Finding**           **Interpretation**        **Action**
+
+  Works in tennis but   Not structural ---        Run tennis-only. Drop
+  not darts/snooker     tennis-specific           the other sports.
+
+  UNDER works but OVER  Compression is real,      Only bet UNDER. Disable
+  doesn't               extension is not          PARITY OVER signals.
+
+  Only works in long    Short formats lack room   Filter to BO5 tennis,
+  formats               to compress               BO17+ snooker, BO19+
+                                                  darts.
+
+  Only works on         Clay suppresses aces      Exclude clay from the
+  grass/hard, not clay  enough to remove edge     tennis model.
+
+  Only works in early   Late rounds have smaller  Restrict mismatch bets
+  rounds                gaps                      to R1--R3.
+  --------------------- ------------------------- -----------------------
+
+7.3 Data Failures (Fixable)
+
+  --------------------- ---------------------- ---------------------------
+  **Symptom**           **Likely Cause**       **Fix**
+
+  R² near zero for      Skill gap metric is    Try Layer 2 composite
+  Claim 1               wrong proxy            instead of Layer 1
+
+  Model worse than      Event rate estimates   Check form window length,
+  naive for Claim 2     are noisy              try trimmed mean
+
+  Huge edges that lose  Probability            Run isotonic regression on
+  money                 calibration is off     model outputs
+
+  Snooker results       Frame win rate as gap  Source ranking points from
+  nonsensical           proxy is circular      snooker.org
+
+  Tennis results        Using all-surface form Segment form builder by
+  inconsistent by       not surface-specific   surface
+  surface                                      
+  --------------------- ---------------------- ---------------------------
+
+8\. Backtest Interpretation --- Phase 2 Results
+
+Once Claims 1--3 pass, the backtest simulates actual betting decisions.
+Here is how to read those results.
+
+8.1 The Three Staking Profiles
+
+Run all three profiles from the blueprint simultaneously. They answer
+different questions:
+
+-   **Conservative (flat £20):** Does the model pick winners? Removes
+    staking noise entirely. If this loses money, the model's predictions
+    are wrong regardless of how you size bets.
+
+-   **Moderate (25% Kelly):** Is there positive expectation? Tests
+    whether edge-based sizing adds value over flat staking. If
+    conservative wins but moderate loses, Kelly is overreacting to noisy
+    edge estimates.
+
+-   **Conviction (full tiered Kelly):** Does confidence differentiation
+    work? Tests whether VERY HIGH conviction bets outperform HIGH and
+    MEDIUM. If all tiers perform equally, the confidence scoring system
+    adds nothing.
+
+8.2 What Healthy Backtest Results Look Like
+
+-   **Equity curve:** Gradually rising with visible drawdowns. Should
+    look like a bumpy upward slope, not a smooth line. A smooth equity
+    curve in a 200-bet sample is a red flag for data leakage.
+
+-   **Drawdown recovery:** Maximum drawdown between 10--20% of peak,
+    recovering within 20--40 bets. If drawdown exceeds 25%, the model
+    hit a structural regime it wasn't prepared for.
+
+-   **Win rate by confidence tier:** VERY_HIGH should win more often
+    than HIGH, which should win more than MEDIUM. If the ordering is
+    random, confidence scoring is noise.
+
+-   **Profit concentration:** Expect 60--70% of total profit to come
+    from the top 20--30% of bets (highest edge). If profit is evenly
+    distributed, the model isn't differentiating well between strong and
+    weak setups.
+
+8.3 Segmented Results You Must Check
+
+Aggregate numbers hide structural problems. Always decompose:
+
+-   **By direction (UNDER vs OVER):** If all profit comes from UNDER and
+    OVER loses money, disable OVER. The signals may not be symmetric.
+
+-   **By sport:** Each sport should be independently profitable or at
+    worst breakeven. If one sport generates all losses, remove it.
+
+-   **By year:** Results must be stable across 2023, 2024, 2025. If 2024
+    carries all the profit, the model may be overfitting to a specific
+    period.
+
+-   **By format:** Long formats should show higher ROI than short
+    formats (more room for the signal to express). If short formats
+    outperform, the model may be capturing noise.
+
+-   **By gap bucket:** The highest-gap bucket should show the best UNDER
+    ROI. The lowest-gap bucket should show the best OVER ROI. If this
+    ordering is jumbled, the skill gap classification isn't working.
+
+8.4 Walk-Forward Stability
+
+The walk-forward test splits time into train/test windows and
+recalibrates between them. What to look for:
+
+-   **Consistent sign:** Each test window should be individually
+    profitable or close to zero. If one window loses 15% while others
+    gain 10%, the model is fragile.
+
+-   **Coefficients don't drift wildly:** If the k value in leg_win_prob
+    jumps from 0.08 to 0.15 between recalibrations, the model is
+    unstable. Coefficients should change by \< 20% between windows.
+
+-   **Bet count doesn't collapse:** If the model finds 50 qualifying
+    bets in Window 1 but only 8 in Window 2, the thresholds may be too
+    tight or the market adapted. Check if lines shifted during that
+    period.
+
+9\. Quick Reference --- Decision Tree
+
+Use this as a fast lookup when running each test.
+
+Claim 1
+
+  ------------------------- ------------- -------------------------------
+  **Result**                **Verdict**   **Next Step**
+
+  Negative slope, p \<      PASS          Proceed to Claim 2
+  0.05, R² \> 0.15 in 2+                  
+  sports                                  
+
+  Negative slope, p \<      WEAK PASS     Proceed but raise edge
+  0.05, R² \< 0.10                        thresholds
+
+  Flat slope or p \> 0.10   FAIL          Stop. Investigate skill gap
+                                          metric.
+
+  Positive slope            CRITICAL FAIL Stop. Data error or thesis is
+                                          inverted.
+
+  Passes in 1 sport only    PARTIAL       Continue that sport. Pause
+                                          others.
+  ------------------------- ------------- -------------------------------
+
+Claim 2
+
+  ---------------------------- ------------- ----------------------------
+  **Result**                   **Verdict**   **Next Step**
+
+  Model MAE \< naive MAE by    PASS          Proceed to Claim 3
+  10%+ in 2+ sports                          
+
+  Model MAE \< naive MAE by    WEAK PASS     Proceed with caution
+  3--10%                                     
+
+  Model MAE ≈ naive MAE or     FAIL          Stop. Decomposition adds no
+  worse                                      value.
+
+  Model better on UNDER, worse PARTIAL       Disable OVER signals,
+  on OVER                                    continue UNDER
+  ---------------------------- ------------- ----------------------------
+
+Claim 3
+
+  ------------------------------- ------------- ---------------------------
+  **Result**                      **Verdict**   **Next Step**
+
+  15--25% of matches show edge \> PASS          Proceed to backtest
+  5%, clustered in thesis                       
+  scenarios                                     
+
+  Edges exist but only with       PROVISIONAL   Must retest with real
+  synthetic lines                               Betfair odds
+
+  Edges exist but random, not     FAIL          No systematic edge. Model
+  scenario-clustered                            is noise.
+
+  Edges \< 3% everywhere          FAIL          Market already prices this.
+                                                No edge.
+  ------------------------------- ------------- ---------------------------
+
+Backtest
+
+  ---------------------------- ------------- ------------------------------
+  **Result**                   **Verdict**   **Next Step**
+
+  ROI 8--18%, stable across    PASS          Proceed to paper trading
+  years, 200+ bets                           
+
+  ROI \> 25%                   SUSPICIOUS    Audit for look-ahead bias
+                                             before proceeding
+
+  ROI positive but one sport   NARROW PASS   Only paper trade the
+  carries all profit                         profitable sport
+
+  ROI negative or \< 2%        FAIL          Do not go live. Recalibrate or
+                                             abandon.
+
+  ROI positive but drawdown \> RISKY PASS    Reduce Kelly fractions by 50%
+  25%                                        
+  ---------------------------- ------------- ------------------------------
