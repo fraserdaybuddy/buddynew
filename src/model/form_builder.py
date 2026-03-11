@@ -59,14 +59,28 @@ EXTRA_COLS = [
     ("avg_ace_rate_grass",      "REAL"),    # tennis — surface-specific
     ("avg_ace_rate_hard",       "REAL"),    # tennis — surface-specific
     ("avg_ace_rate_clay",       "REAL"),    # tennis — surface-specific
-    ("avg_serve_strength",      "REAL"),    # tennis — 100 - opp_ret_pts%
-    ("avg_return_pts_pct",      "REAL"),    # tennis — return quality
+    ("avg_serve_strength",      "REAL"),    # tennis — 100 - opp_ret_pts% (all surfaces)
+    ("avg_return_pts_pct",      "REAL"),    # tennis — return quality (all surfaces)
+    ("avg_serve_str_hard",      "REAL"),    # tennis — surface-specific serve strength
+    ("avg_serve_str_clay",      "REAL"),    # tennis — surface-specific serve strength
+    ("avg_serve_str_grass",     "REAL"),    # tennis — surface-specific serve strength
+    ("avg_ret_str_hard",        "REAL"),    # tennis — surface-specific return strength
+    ("avg_ret_str_clay",        "REAL"),    # tennis — surface-specific return strength
+    ("avg_ret_str_grass",       "REAL"),    # tennis — surface-specific return strength
+    ("serve_style",             "TEXT"),    # tennis — big_server/balanced/returner
     ("form_trajectory",         "REAL"),    # all — slope of last 7 rates
     ("outlier_in_window",       "INTEGER"), # all — flag
     ("surface_form_missing",    "INTEGER"), # tennis — fallback flag
     ("player_tier",             "INTEGER"), # 1 / 2 / 3
     ("data_quality",            "TEXT"),    # FULL / LOW_SAMPLE / STALE
 ]
+
+# Serve style thresholds (serve_strength = 100 - opp_ret_pts_won_pct)
+# Tour averages: ATP Hard ~61%, Clay ~59%, Grass ~63%; WTA Hard ~56%, Clay ~54%, Grass ~58%
+# Combined (ATP+WTA in DB): ~61% overall
+SERVE_STYLE_BIG    = 64.0   # big_server: serve_strength > 64%
+SERVE_STYLE_RETURN = 56.0   # returner: serve_strength < 56%
+                             # balanced: 56-64%
 
 
 def migrate_schema(conn: sqlite3.Connection) -> None:
@@ -337,6 +351,15 @@ class TennisHistory:
         if surface:
             self.surf[surface].append(entry)
 
+    def _surface_stat(self, surface: str, key: str) -> Optional[float]:
+        """Return decay-weighted mean of `key` for a specific surface."""
+        entries = self.surf.get(surface, [])[-FORM_WINDOW:]
+        vals = [e[key] for e in entries if e.get(key) is not None]
+        if not vals:
+            return None
+        wts = DECAY_WEIGHTS[-len(vals):]
+        return _weighted_mean(vals, wts)
+
     def form(self, surface: str) -> dict:
         total_n      = len(self.all)
         surf_entries = self.surf.get(surface, [])
@@ -349,31 +372,52 @@ class TennisHistory:
         serves = [e["serve"] for e in w]
         rets   = [e["ret"]   for e in w]
 
-        # Surface-specific rates from full history
-        def surface_rate(s):
-            entries = self.surf.get(s, [])[-FORM_WINDOW:]
-            vals = [e["ace"] for e in entries if e["ace"] is not None]
-            if not vals: return None
-            wts = DECAY_WEIGHTS[-len(vals):]
-            return _weighted_mean(vals, wts)
-
         trajectory = _slope(aces)
         s_median   = _median([e["ace"] for e in self.all]) or 0
         outlier    = any(_is_outlier(a, s_median) for a in aces if a is not None)
+
+        # Surface-specific stats
+        ace_grass  = self._surface_stat("Grass", "ace")
+        ace_hard   = self._surface_stat("Hard",  "ace")
+        ace_clay   = self._surface_stat("Clay",  "ace")
+        serv_hard  = self._surface_stat("Hard",  "serve")
+        serv_clay  = self._surface_stat("Clay",  "serve")
+        serv_grass = self._surface_stat("Grass", "serve")
+        ret_hard   = self._surface_stat("Hard",  "ret")
+        ret_clay   = self._surface_stat("Clay",  "ret")
+        ret_grass  = self._surface_stat("Grass", "ret")
+
+        # Serve style: classify from rolling weighted serve_strength (all surfaces)
+        avg_serve = _weighted_mean(serves, weights)
+        serve_style = None
+        if avg_serve is not None:
+            if avg_serve >= SERVE_STYLE_BIG:
+                serve_style = "big_server"
+            elif avg_serve <= SERVE_STYLE_RETURN:
+                serve_style = "returner"
+            else:
+                serve_style = "balanced"
 
         return {
             "n": n,
             "tier": _player_tier(total_n),
             "data_quality": _data_quality(total_n),
             "avg_ace_rate_per_svpt": _trimmed_weighted_mean(aces, weights),
-            "avg_ace_rate_grass":   surface_rate("Grass"),
-            "avg_ace_rate_hard":    surface_rate("Hard"),
-            "avg_ace_rate_clay":    surface_rate("Clay"),
-            "avg_serve_strength":   _weighted_mean(serves, weights),
-            "avg_return_pts_pct":   _weighted_mean(rets,   weights),
-            "form_trajectory":      trajectory,
-            "outlier_in_window":    int(outlier),
-            "surface_form_missing": int(not use_surf),
+            "avg_ace_rate_grass":    ace_grass,
+            "avg_ace_rate_hard":     ace_hard,
+            "avg_ace_rate_clay":     ace_clay,
+            "avg_serve_strength":    avg_serve,
+            "avg_return_pts_pct":    _weighted_mean(rets, weights),
+            "avg_serve_str_hard":    serv_hard,
+            "avg_serve_str_clay":    serv_clay,
+            "avg_serve_str_grass":   serv_grass,
+            "avg_ret_str_hard":      ret_hard,
+            "avg_ret_str_clay":      ret_clay,
+            "avg_ret_str_grass":     ret_grass,
+            "serve_style":           serve_style,
+            "form_trajectory":       trajectory,
+            "outlier_in_window":     int(outlier),
+            "surface_form_missing":  int(not use_surf),
         }
 
 
@@ -407,14 +451,21 @@ def build_tennis_form(conn: sqlite3.Connection, dry_run: bool) -> int:
 
             if not dry_run:
                 _upsert_form(conn, pid, "tennis", date, form, {
-                    "avg_aces_per_match": form.get("avg_ace_rate_per_svpt"),
-                    "avg_return_pts_won": form.get("avg_return_pts_pct"),
+                    "avg_aces_per_match":    form.get("avg_ace_rate_per_svpt"),
+                    "avg_return_pts_won":    form.get("avg_return_pts_pct"),
                     "avg_ace_rate_per_svpt": form.get("avg_ace_rate_per_svpt"),
                     "avg_ace_rate_grass":    form.get("avg_ace_rate_grass"),
                     "avg_ace_rate_hard":     form.get("avg_ace_rate_hard"),
                     "avg_ace_rate_clay":     form.get("avg_ace_rate_clay"),
                     "avg_serve_strength":    form.get("avg_serve_strength"),
                     "avg_return_pts_pct":    form.get("avg_return_pts_pct"),
+                    "avg_serve_str_hard":    form.get("avg_serve_str_hard"),
+                    "avg_serve_str_clay":    form.get("avg_serve_str_clay"),
+                    "avg_serve_str_grass":   form.get("avg_serve_str_grass"),
+                    "avg_ret_str_hard":      form.get("avg_ret_str_hard"),
+                    "avg_ret_str_clay":      form.get("avg_ret_str_clay"),
+                    "avg_ret_str_grass":     form.get("avg_ret_str_grass"),
+                    "serve_style":           form.get("serve_style"),
                     "form_trajectory":       form.get("form_trajectory"),
                     "outlier_in_window":     form.get("outlier_in_window"),
                     "surface_form_missing":  form.get("surface_form_missing"),
