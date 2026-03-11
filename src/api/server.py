@@ -162,10 +162,16 @@ def signals():
     sport      = request.args.get("sport", "tennis")
 
     try:
-        from src.model.edge import screen_from_db
+        from src.model.edge import screen_from_db, screen_from_betfair_markets
         raw = screen_from_db(match_date, bankroll, mode, sport=sport)
+        # Fall back to live Betfair event screener when no DB matches for date
+        if not raw and sport == "tennis":
+            raw = screen_from_betfair_markets(
+                sport=sport, surface="Hard", best_of=3,
+                bankroll=bankroll, mode=mode, min_liquidity=50.0,
+            )
     except Exception as e:
-        log.exception("screen_from_db failed")
+        log.exception("screener failed")
         return jsonify({"error": str(e), "signals": [], "bets": 0, "total": 0})
 
     def sig_to_dict(s):

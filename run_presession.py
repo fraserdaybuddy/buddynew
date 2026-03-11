@@ -93,12 +93,14 @@ def run(
 
     from src.database import get_conn
     conn = get_conn()
+    # event_name column is only added on first real (non-dry-run) write
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(betfair_markets)").fetchall()]
+    ev_col = ", event_name" if "event_name" in cols else ", NULL as event_name"
     rows = conn.execute(
-        """SELECT market_type, line, over_odds, under_odds, total_matched,
-                  event_name, match_id, verified
+        f"""SELECT market_type, line, over_odds, under_odds, total_matched
+                  {ev_col}, match_id, verified
            FROM betfair_markets
            WHERE sport = 'tennis'
-             AND market_id LIKE '%'
            ORDER BY event_name, market_type, line"""
     ).fetchall()
     conn.close()
@@ -126,8 +128,19 @@ def run(
     log.info(f"STEP 3: Edge screening — {match_date}  bankroll=£{bankroll:.0f}  mode={mode}")
     log.info("=" * 60)
 
-    from src.model.edge import screen_from_db
+    from src.model.edge import screen_from_db, screen_from_betfair_markets
+
+    # Try DB-driven screener first (needs 2026 matches in DB)
     signals = screen_from_db(match_date, bankroll, mode, sport="tennis")
+
+    # If no signals from DB (e.g. data only goes to 2024), fall back to
+    # live screener that reads directly from betfair_markets event names
+    if not signals:
+        log.info("[edge] No DB matches for date — using live Betfair event screener")
+        signals = screen_from_betfair_markets(
+            sport="tennis", surface="Hard", best_of=3,
+            bankroll=bankroll, mode=mode, min_liquidity=50.0,
+        )
 
     bets    = [s for s in signals if s.stake_gbp > 0]
     watches = [s for s in signals if s.stake_gbp == 0 and not s.reject_reason]

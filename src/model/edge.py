@@ -532,6 +532,214 @@ def _screen_tennis_from_db(
     return signals
 
 
+# ── Live screener — reads betfair_markets event names directly ────────────────
+
+def _lookup_elo_by_name(conn: sqlite3.Connection, query: str, surface: str) -> tuple:
+    """
+    Find the best-matching player_id and ELO for a name fragment.
+    Betfair names are like "A Sabalenka", "Djokovic", "Le Tien", "Carlos Alcaraz".
+    Searches player full_name and player_aliases raw_name, tries the last word
+    (surname) as a fallback.
+
+    Returns (player_id, elo, full_name, match_count) or (None, 1500, query, 0).
+    """
+    surf_map = {"Hard": "Hard", "Clay": "Clay", "Grass": "Grass"}
+    surf_key = surf_map.get(surface, "Hard")
+
+    def _search(fragment):
+        rows = conn.execute(
+            """SELECT pa.player_id, p.full_name, er.elo, er.match_count
+               FROM player_aliases pa
+               JOIN players p ON pa.player_id = p.player_id
+               LEFT JOIN elo_ratings er
+                     ON pa.player_id = er.player_id AND er.surface = ?
+               WHERE pa.raw_name LIKE ? COLLATE NOCASE
+                  OR p.full_name LIKE ? COLLATE NOCASE
+               ORDER BY er.match_count DESC NULLS LAST, p.full_name
+               LIMIT 1""",
+            (surf_key, f"%{fragment}%", f"%{fragment}%")
+        ).fetchone()
+        if rows and rows["elo"] is None:
+            # Try Overall ELO as fallback
+            overall = conn.execute(
+                "SELECT elo, match_count FROM elo_ratings WHERE player_id=? AND surface='Overall'",
+                (rows["player_id"],)
+            ).fetchone()
+            if overall:
+                return rows["player_id"], overall["elo"], rows["full_name"], overall["match_count"]
+        return (rows["player_id"], rows["elo"], rows["full_name"], rows["match_count"]) if rows else None
+
+    result = _search(query)
+    if result:
+        return result
+
+    # Fallback: try surname only (last word)
+    surname = query.strip().split()[-1]
+    if len(surname) >= 3 and surname != query.strip():
+        result = _search(surname)
+        if result:
+            return result
+
+    # Last resort: try each word of the name
+    for word in query.strip().split():
+        if len(word) >= 4:
+            result = _search(word)
+            if result:
+                return result
+
+    return None, 1500.0, query, 0
+
+
+def screen_from_betfair_markets(
+    sport: str = "tennis",
+    surface: str = "Hard",
+    best_of: int = 3,
+    bankroll: float = 1000.0,
+    mode: str = "PAPER",
+    min_liquidity: float = 50.0,
+) -> list:
+    """
+    Live screener that works WITHOUT needing 2026 matches in the DB.
+
+    Reads event names directly from betfair_markets (already populated by
+    run_presession.py), looks up each player's ELO from elo_ratings, runs
+    the Monte Carlo simulation, and computes edge vs the live Betfair line.
+
+    Only processes markets with total_matched >= min_liquidity.
+    Uses the line closest to the model's fair median for edge calculation.
+
+    Returns list of BetSignal — one per event per market type.
+    """
+    from src.model.simulate import simulate, elo_to_hold_probs
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    # Get distinct events with their best lines (by liquidity)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(betfair_markets)").fetchall()]
+    ev_col = "event_name" if "event_name" in cols else "NULL"
+
+    rows = conn.execute(
+        f"""SELECT {ev_col} as event_name, market_type,
+                  line, over_odds, under_odds, total_matched
+           FROM betfair_markets
+           WHERE sport = ?
+             AND over_odds IS NOT NULL
+             AND under_odds IS NOT NULL
+             AND (total_matched >= ? OR total_matched IS NULL)
+           ORDER BY event_name, market_type, total_matched DESC""",
+        (sport, min_liquidity)
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        return []
+
+    # Group rows: event_name → market_type → list of (line, over, under, matched)
+    from collections import defaultdict
+    events: dict = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        events[r["event_name"]][r["market_type"]].append(dict(r))
+
+    signals = []
+
+    for event_name, markets in events.items():
+        # Parse "PlayerA v PlayerB"
+        parts = [p.strip() for p in event_name.split(" v ")]
+        if len(parts) != 2:
+            continue
+        name_a, name_b = parts
+
+        p1_id, p1_elo, p1_name, p1_n = _lookup_elo_by_name(conn, name_a, surface)
+        p2_id, p2_elo, p2_name, p2_n = _lookup_elo_by_name(conn, name_b, surface)
+
+        p1_elo = p1_elo or 1500.0
+        p2_elo = p2_elo or 1500.0
+        elo_gap = p1_elo - p2_elo
+        abs_gap = abs(elo_gap)
+
+        # Build a synthetic match_id from event name
+        match_id = f"BF:{event_name[:24].replace(' ','_')}"
+
+        # Run simulation
+        try:
+            s_a, s_b = elo_to_hold_probs(elo_gap, surface, best_of)
+            sim = simulate(s_a, s_b, best_of, tiebreak_rule="standard", n=10_000, seed=42)
+        except Exception as e:
+            log.warning(f"[edge] simulation failed for {event_name}: {e}")
+            continue
+
+        tier = 1 if min(p1_n or 0, p2_n or 0) >= 10 else (2 if min(p1_n or 0, p2_n or 0) >= 3 else 3)
+
+        for market_type, market_rows in markets.items():
+            # Pick the line closest to the model's fair line
+            if market_type == "total_games":
+                fair = sim.fair_line_games()
+                p_over_fn  = sim.p_games_over
+                p_under_fn = sim.p_games_under
+            elif market_type == "total_sets":
+                fair = sim.fair_line_sets()
+                p_over_fn  = sim.p_sets_over
+                p_under_fn = sim.p_sets_under
+            else:
+                continue
+
+            # Find the row with line closest to fair
+            best_row = min(market_rows, key=lambda r: abs(r["line"] - fair))
+            line      = best_row["line"]
+            over_odds  = best_row["over_odds"]
+            under_odds = best_row["under_odds"]
+            matched    = best_row["total_matched"] or 0
+
+            if not over_odds or not under_odds:
+                continue
+
+            p_over  = p_over_fn(line)
+            p_under = p_under_fn(line)
+            mkt_p_over, mkt_p_under = devig_2way(over_odds, under_odds)
+
+            for direction, model_p, market_p, edge_val, odds in [
+                ("OVER",  p_over,  mkt_p_over,  p_over  - mkt_p_over,  over_odds),
+                ("UNDER", p_under, mkt_p_under, p_under - mkt_p_under, under_odds),
+            ]:
+                if abs(edge_val) < 0.001:
+                    continue
+
+                fraction, stake = recommended_stake(edge_val, odds, bankroll, tier, abs_gap) \
+                    if edge_val >= MIN_EDGE else (0.0, 0.0)
+
+                # ELO gap filter
+                ok, reject_reason, filters = check_filters(
+                    abs_gap, tier, tier,
+                    None, None, "2026-03-11",
+                    p1_n or 0, p2_n or 0,
+                    matched if matched > 0 else None,
+                    False,
+                )
+
+                signals.append(BetSignal(
+                    match_id=match_id,
+                    sport=sport,
+                    market_type=market_type,
+                    direction=direction,
+                    line=line,
+                    model_p=round(model_p, 4),
+                    market_p=round(market_p, 4),
+                    edge=round(edge_val, 4),
+                    odds=odds,
+                    kelly_frac=round(fraction, 4),
+                    stake_gbp=stake if (ok and edge_val >= MIN_EDGE) else 0.0,
+                    tier=tier,
+                    mode=mode,
+                    synthetic_line=False,
+                    filters_passed=filters,
+                    reject_reason=None if ok else reject_reason,
+                ))
+
+    conn.close()
+    return signals
+
+
 # ── Ledger writer ─────────────────────────────────────────────────────────────
 
 def write_to_ledger(signals: list, run_id: str, conn: sqlite3.Connection) -> int:

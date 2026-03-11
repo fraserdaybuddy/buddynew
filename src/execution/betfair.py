@@ -168,6 +168,8 @@ class BetfairSession:
     def post(self, endpoint: str, body: dict) -> dict:
         url  = f"{API_URL}/{endpoint}/"
         resp = requests.post(url, json=body, headers=self._headers(), timeout=30)
+        if not resp.ok:
+            log.error(f"[betfair] {endpoint} → {resp.status_code}: {resp.text[:400]}")
         resp.raise_for_status()
         return resp.json()
 
@@ -225,14 +227,16 @@ def get_market_book(
     For settled markets returns last traded price.
     """
     if not price_projection:
+        # EX_BEST_OFFERS only — EX_TRADED triggers TOO_MUCH_DATA for large markets
+        # (Total Games markets have 110+ runners; 19 markets × 110 × 2 > API limit)
+        # Market-level totalMatched is used for liquidity instead of per-runner volume.
         price_projection = {
-            "priceData": ["EX_BEST_OFFERS", "EX_TRADED"],
+            "priceData": ["EX_BEST_OFFERS"],
         }
+    # orderProjection / matchProjection are NOT valid for delayed/data app keys
     body = {
         "marketIds":       market_ids,
         "priceProjection": price_projection,
-        "orderProjection": "ALL",
-        "matchProjection": "NO_ROLLUP",
     }
     return session.post("listMarketBook", body)
 

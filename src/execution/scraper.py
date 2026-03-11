@@ -369,23 +369,34 @@ def poll_sport(
             meta       = {m["marketId"]: m for m in markets}
             market_ids = list(meta.keys())
 
-            # Fetch live prices in batches of 40 (API limit)
+            # Batch size 5: Total Games markets have 110+ runners per market.
+            # Betfair TOO_MUCH_DATA triggers at large runner counts; 5 markets
+            # × 110 runners × 1 projection ≈ 550 is safely within limits.
             all_books = []
-            for i in range(0, len(market_ids), 40):
-                all_books.extend(get_market_book(session, market_ids[i:i+40]))
+            for i in range(0, len(market_ids), 5):
+                all_books.extend(get_market_book(session, market_ids[i:i+5]))
 
             for book in all_books:
-                mid          = book["marketId"]
-                catalogue    = meta.get(mid, {})
-                event_name   = catalogue.get("event", {}).get("name", "")
-                cat_runners  = catalogue.get("runners", [])
-                book_runners = book.get("runners", [])
+                mid              = book["marketId"]
+                catalogue        = meta.get(mid, {})
+                event_name       = catalogue.get("event", {}).get("name", "")
+                cat_runners      = catalogue.get("runners", [])
+                book_runners     = book.get("runners", [])
+                # Market-level totalMatched (EX_TRADED not requested — use as liquidity proxy)
+                market_matched   = book.get("totalMatched", 0.0) or 0.0
 
                 # Choose correct line extractor
                 if betfair_type in SET_COUNT_MARKET_TYPES:
                     lines = _extract_set_count_lines(cat_runners, book_runners)
                 else:
                     lines = _extract_lines(cat_runners, book_runners)
+
+                # Without EX_TRADED, runner.totalMatched = 0.
+                # Use market-level totalMatched as liquidity proxy for all lines.
+                lines = [
+                    (hcap, ov, un, round(market_matched, 2) if (not mkt) and market_matched > 0 else mkt)
+                    for (hcap, ov, un, mkt) in lines
+                ]
 
                 if not lines:
                     log.warning(f"[scraper] {mid} {event_name!r}: no lines parsed — skipping")
