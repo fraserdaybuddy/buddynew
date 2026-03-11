@@ -48,7 +48,6 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "universe.db"
 # ── Kelly constants ────────────────────────────────────────────────────────────
 
 TIER_MULT = {1: 1.00, 2: 0.70, 3: 0.40}
-MAX_KELLY_FRACTION = 0.05   # never risk more than 5% of bankroll on one bet
 MIN_EDGE = 0.08             # 8% minimum edge
 MIN_ELO_GAP = 50.0          # minimum ELO separation (Gate 4 validated)
 MIN_LIQUIDITY_GBP = 50.0    # minimum matched volume on Betfair
@@ -80,25 +79,10 @@ class BetSignal:
 
 # ── Kelly calculation ──────────────────────────────────────────────────────────
 
-def kelly_fraction(p: float, decimal_odds: float) -> float:
-    """Raw Kelly fraction. Negative = no bet."""
-    b = decimal_odds - 1.0
-    if b <= 0 or p <= 0:
-        return 0.0
-    return (p * b - (1.0 - p)) / b
-
-
 def elo_confidence(abs_elo_gap: float) -> float:
     """
     Scale factor in [0, 1] based on ELO gap magnitude.
-
-    At gap = MIN_ELO_GAP (50): confidence = 0.30 (barely above no-bet threshold)
-    At gap = 200:              confidence = 0.75
-    At gap = 350+:             confidence = 1.00 (full multiplier)
-
-    Rationale: a 51-point ELO gap has far less predictive certainty than a
-    350-point gap. The Kelly fraction from edge alone doesn't capture this —
-    it only sees the market price gap, not the uncertainty in our model estimate.
+    At gap = MIN_ELO_GAP (50): 0.0   At gap = 350+: 1.0
     """
     lo, hi = MIN_ELO_GAP, 350.0
     if abs_elo_gap <= lo:
@@ -109,32 +93,29 @@ def elo_confidence(abs_elo_gap: float) -> float:
 
 
 def recommended_stake(
-    p: float,
+    edge: float,
     decimal_odds: float,
     bankroll: float,
     tier: int,
-    abs_elo_gap: float = 200.0,
-    max_fraction: float = MAX_KELLY_FRACTION,
+    abs_elo_gap: float,
 ) -> tuple:
     """
-    Returns (kelly_frac, stake_gbp).
+    Returns (fraction_used, stake_gbp) via governor.kelly_stake().
 
-    Applies two confidence multipliers:
-      tier_mult    — data quality (T1=1.0, T2=0.70, T3=0.40)
-      elo_conf     — ELO separation confidence (0.30 at gap=50 → 1.0 at gap=350+)
+    Confidence fraction = KELLY_FRACTION × tier_mult × elo_confidence
+      KELLY_FRACTION — base quarter-Kelly (0.25), same as all other models
+      tier_mult      — data quality: T1=1.0  T2=0.70  T3=0.40
+      elo_confidence — ELO separation: 0.0 at gap=50 → 1.0 at gap=350+
 
-    Combined: kelly_adjusted = raw_kelly × tier_mult × elo_conf
-    Hard cap: never more than MAX_KELLY_FRACTION of bankroll.
+    Governor handles min_stake (£5) and max_stake (£500) clamping.
+    No separate hard cap here — the fraction IS the confidence weight.
     """
-    raw_k = kelly_fraction(p, decimal_odds)
-    if raw_k <= 0:
-        return (raw_k, 0.0)
+    from src.execution.governor import kelly_stake, KELLY_FRACTION
     tier_mult = TIER_MULT.get(tier, 0.40)
     elo_conf  = elo_confidence(abs_elo_gap)
-    combined  = tier_mult * elo_conf
-    capped    = min(raw_k * combined, max_fraction)
-    stake     = round(bankroll * capped, 2)
-    return (raw_k, stake)
+    fraction  = KELLY_FRACTION * tier_mult * elo_conf
+    stake     = kelly_stake(bankroll, edge, decimal_odds, fraction=fraction)
+    return (fraction, stake)
 
 
 # ── Market line helpers ────────────────────────────────────────────────────────
@@ -311,13 +292,13 @@ def screen_tennis_match(
         ("UNDER", p_under_g, mkt_p_under_g, edge_under_g, under_odds_g),
     ]:
         if edge >= min_edge and not is_synth_g:
-            raw_k, stake = recommended_stake(model_p, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="total_games",
                 direction=direction, line=line_g,
                 model_p=round(model_p, 4), market_p=round(market_p, 4),
                 edge=round(edge, 4), odds=odds,
-                kelly_frac=round(raw_k, 4), stake_gbp=stake,
+                kelly_frac=round(fraction, 4), stake_gbp=stake,
                 tier=tier, mode=mode, synthetic_line=False,
                 filters_passed=["elo_gap_ok", "liquidity_ok", "form_fresh"],
             ))
@@ -345,13 +326,13 @@ def screen_tennis_match(
         ("UNDER", p_under_s, mkt_p_under_s, edge_under_s, under_odds_s),
     ]:
         if edge >= min_edge and not is_synth_s:
-            raw_k, stake = recommended_stake(model_p, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="total_sets",
                 direction=direction, line=line_s,
                 model_p=round(model_p, 4), market_p=round(market_p, 4),
                 edge=round(edge, 4), odds=odds,
-                kelly_frac=round(raw_k, 4), stake_gbp=stake,
+                kelly_frac=round(fraction, 4), stake_gbp=stake,
                 tier=tier, mode=mode, synthetic_line=False,
                 filters_passed=["elo_gap_ok", "liquidity_ok", "form_fresh"],
             ))
@@ -384,13 +365,13 @@ def screen_tennis_match(
         ("AWAY", 1-p_set_p1,     mkt_p2_fs, edge_p2, p2_odds),
     ]:
         if edge >= min_edge and not is_synth_fs:
-            raw_k, stake = recommended_stake(model_p, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="first_set",
                 direction=player, line=0,
                 model_p=round(model_p, 4), market_p=round(market_p, 4),
                 edge=round(edge, 4), odds=odds,
-                kelly_frac=round(raw_k, 4), stake_gbp=stake,
+                kelly_frac=round(fraction, 4), stake_gbp=stake,
                 tier=tier, mode=mode, synthetic_line=False,
                 filters_passed=["elo_gap_ok", "liquidity_ok", "form_fresh"],
             ))
