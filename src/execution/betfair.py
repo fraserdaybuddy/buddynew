@@ -37,12 +37,48 @@ EVENT_TYPES = {
     "tennis":  "2",      # Tennis
 }
 
-# Market types for totals markets
-# These are the Betfair market type codes for over/under stat markets
+# ── Market type codes for all target markets ──────────────────────────────────
+# See BETFAIR_MARKET_SPEC.md for full verification status and runner format.
+#
+# Confidence key:  HIGH = confirmed on Betfair
+#                  MEDIUM = strongly expected but not yet verified via API
+#                  LOW = unverified, may not exist
+#
+TARGET_MARKET_TYPES = {
+    "tennis": [
+        "TOTAL_GAMES",          # HIGH — Total games O/U (most liquid tennis stat market)
+        "TOTAL_SETS",           # HIGH — Total sets O/U (also "NUMBER_OF_SETS")
+        "NUMBER_OF_SETS",       # alias — try both in queries
+        "FIRST_SET_WINNER",     # HIGH — First set winner (moneyline)
+        "SET_WINNER",           # alias — may appear as SET_WINNER with "1st Set" in name
+        "SET_1_TOTAL_GAMES",    # LOW  — First set total games (verify existence)
+        "MATCH_ODDS",           # confirmed — match winner (not our primary target)
+    ],
+    "darts": [
+        "TOTAL_180S",           # HIGH — Total 180s O/U (major PDC events only)
+        "TOTAL_LEGS",           # LOW  — Total legs O/U (UNVERIFIED — may not exist)
+        "MATCH_ODDS",           # confirmed — match winner
+    ],
+    "snooker": [
+        "TOTAL_FRAMES",         # HIGH — Total frames O/U
+        "TOTAL_CENTURIES",      # LOW  — Total centuries O/U (UNVERIFIED)
+        "MATCH_ODDS",           # confirmed — match winner
+    ],
+}
+
+# Primary stat markets per sport (the ones we actually bet)
+STAT_MARKET_TYPES = {
+    "tennis":  ["TOTAL_GAMES", "TOTAL_SETS", "NUMBER_OF_SETS",
+                "FIRST_SET_WINNER", "SET_WINNER", "SET_1_TOTAL_GAMES"],
+    "darts":   ["TOTAL_180S", "TOTAL_LEGS"],
+    "snooker": ["TOTAL_FRAMES", "TOTAL_CENTURIES"],
+}
+
+# Legacy alias kept for backwards compat
 TOTALS_MARKET_TYPES = {
-    "darts":   ["TOTAL_180S", "MATCH_ODDS"],    # TOTAL_180S is the target
-    "snooker": ["TOTAL_CENTURIES", "MATCH_ODDS"],
-    "tennis":  ["TOTAL_ACES", "MATCH_ODDS"],
+    "darts":   STAT_MARKET_TYPES["darts"],
+    "snooker": STAT_MARKET_TYPES["snooker"],
+    "tennis":  STAT_MARKET_TYPES["tennis"],
 }
 
 
@@ -236,11 +272,10 @@ def search_totals_markets(
     to_date:   str,
 ) -> list[dict]:
     """
-    Find totals (O/U) markets for a sport. Returns matching markets.
-    Primary target: TOTAL_180S (darts), TOTAL_CENTURIES (snooker), TOTAL_ACES (tennis).
-    Falls back to all markets if specific type not found.
+    Find stat O/U markets for a sport. Returns matching markets.
+    Uses STAT_MARKET_TYPES[sport] — see BETFAIR_MARKET_SPEC.md for verification status.
     """
-    market_types = TOTALS_MARKET_TYPES.get(sport, [])
+    market_types = STAT_MARKET_TYPES.get(sport, [])
     results = []
 
     for mtype in market_types:
@@ -257,6 +292,36 @@ def search_totals_markets(
     return results
 
 
+def list_all_markets(
+    session:   BetfairSession,
+    sport:     str,
+    from_date: str,
+    to_date:   str,
+) -> list[dict]:
+    """
+    Fetch ALL market types for a sport (no marketTypeCodes filter).
+    Use this to discover available market type codes — run once after login
+    to verify BETFAIR_MARKET_SPEC.md assumptions.
+
+    Returns markets with unique marketType values printed to console.
+    """
+    event_type_id = EVENT_TYPES.get(sport)
+    if not event_type_id:
+        raise ValueError(f"Unknown sport: {sport}")
+
+    body = {
+        "filter": {
+            "eventTypeIds": [event_type_id],
+            "marketStartTime": {"from": from_date, "to": to_date},
+        },
+        "marketProjection": ["MARKET_START_TIME", "EVENT", "RUNNER_DESCRIPTION",
+                             "MARKET_CATALOGUE"],
+        "maxResults": "500",
+        "sort": "FIRST_TO_START",
+    }
+    return session.post("listMarketCatalogue", body)
+
+
 # ── Main / CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -265,10 +330,12 @@ def main():
         format="%(asctime)s [%(name)s] %(message)s",
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test",           action="store_true", help="Test authentication")
-    parser.add_argument("--list-events",    action="store_true", help="List all event types")
-    parser.add_argument("--search-markets", choices=["darts","snooker","tennis"],
-                        help="Search for totals markets for a sport")
+    parser.add_argument("--test",             action="store_true", help="Test authentication")
+    parser.add_argument("--list-events",      action="store_true", help="List all event types")
+    parser.add_argument("--search-markets",   choices=["darts","snooker","tennis"],
+                        help="Search for stat O/U markets for a sport")
+    parser.add_argument("--list-all-markets", choices=["darts","snooker","tennis"],
+                        help="List ALL market types for a sport (for verification)")
     parser.add_argument("--from-date", default="2024-01-01T00:00:00Z")
     parser.add_argument("--to-date",   default="2025-12-31T23:59:59Z")
     args = parser.parse_args()
@@ -294,17 +361,46 @@ def main():
 
     if args.search_markets:
         sport = args.search_markets
-        print(f"[betfair] Searching {sport} totals markets {args.from_date} → {args.to_date}")
+        print(f"[betfair] Searching {sport} stat markets {args.from_date} → {args.to_date}")
         session.login()
         markets = search_totals_markets(session, sport, args.from_date, args.to_date)
         print(f"\nFound {len(markets)} markets:")
         for m in markets[:20]:
             event = m.get("event", {})
-            print(f"  {m.get('marketId'):<14}  {m.get('marketName'):<30}  "
-                  f"{event.get('name',''):<30}  "
-                  f"{m.get('marketStartTime','')[:10]}")
+            mtype = m.get("_query_market_type", "?")
+            print(f"  {m.get('marketId'):<14}  {mtype:<25}  {m.get('marketName'):<30}  "
+                  f"{event.get('name',''):<30}  {m.get('marketStartTime','')[:10]}")
         if len(markets) > 20:
             print(f"  ... and {len(markets)-20} more")
+        session.logout()
+        return
+
+    if args.list_all_markets:
+        sport = args.list_all_markets
+        print(f"[betfair] Fetching ALL {sport} market types {args.from_date} → {args.to_date}")
+        print("[betfair] Use this to verify market type codes for BETFAIR_MARKET_SPEC.md\n")
+        session.login()
+        markets = list_all_markets(session, sport, args.from_date, args.to_date)
+
+        # Collect unique market types and counts
+        type_counts = {}
+        for m in markets:
+            mt = m.get("marketType", "UNKNOWN")
+            type_counts[mt] = type_counts.get(mt, 0) + 1
+
+        print(f"Found {len(markets)} markets, {len(type_counts)} unique market types:\n")
+        print(f"  {'Market Type Code':<35}  {'Count':>6}")
+        print(f"  {'-'*35}  {'-'*6}")
+        for mtype, count in sorted(type_counts.items(), key=lambda x: -x[1]):
+            target = " <-- TARGET" if mtype in TARGET_MARKET_TYPES.get(sport, []) else ""
+            print(f"  {mtype:<35}  {count:>6}{target}")
+
+        print(f"\nSample markets (first 15):")
+        for m in markets[:15]:
+            event = m.get("event", {})
+            mtype = m.get("marketType", "?")
+            print(f"  {m.get('marketId'):<14}  {mtype:<30}  {m.get('marketName'):<35}  "
+                  f"{event.get('name','')}")
         session.logout()
         return
 
