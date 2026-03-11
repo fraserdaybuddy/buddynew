@@ -801,89 +801,49 @@
 
       <div class="grid-4">
         <div class="card card-accent">
-          <div class="card-label">Today's Matches</div>
-          <div class="card-value">12</div>
-          <div class="card-sub">4 with edge &gt; 5%</div>
+          <div class="card-label">Today's Signals</div>
+          <div class="card-value" id="stat-total-val">—</div>
+          <div class="card-sub" id="stat-total-sub">loading…</div>
         </div>
         <div class="card">
           <div class="card-label">Tennis Today</div>
-          <div class="card-value blue">7</div>
-          <div class="card-sub">3 with edge &gt; 5%</div>
-          <div class="progress-wrap"><div class="progress-fill blue" style="width:43%"></div></div>
+          <div class="card-value blue" id="stat-tennis-val">—</div>
+          <div class="card-sub" id="stat-tennis-sub">loading…</div>
+          <div class="progress-wrap"><div class="progress-fill blue" id="stat-tennis-bar" style="width:0%"></div></div>
         </div>
         <div class="card">
-          <div class="card-label">Darts Today</div>
-          <div class="card-value" style="color:var(--warn)">3</div>
-          <div class="card-sub">1 with edge &gt; 5%</div>
-          <div class="progress-wrap"><div class="progress-fill orange" style="width:33%"></div></div>
+          <div class="card-label">DB Health</div>
+          <div class="card-value" id="stat-db-val" style="color:var(--warn)">—</div>
+          <div class="card-sub" id="stat-db-sub">loading…</div>
         </div>
         <div class="card">
-          <div class="card-label">Snooker Today</div>
-          <div class="card-value yellow">2</div>
-          <div class="card-sub">0 with edge &gt; 5%</div>
-          <div class="progress-wrap"><div class="progress-fill" style="width:0%"></div></div>
+          <div class="card-label">Betfair Markets</div>
+          <div class="card-value yellow" id="stat-bm-val">—</div>
+          <div class="card-sub" id="stat-bm-sub">loading…</div>
+          <div class="progress-wrap"><div class="progress-fill" id="stat-bm-bar" style="width:0%"></div></div>
         </div>
       </div>
 
       <div class="section-title">Live Edge Opportunities</div>
       <div class="table-wrap">
         <div class="table-header">
-          <div class="table-title">Flagged Matches — Edge &gt; 5%</div>
-          <span class="status-pill pill-green">4 found</span>
+          <div class="table-title" id="signals-title">Flagged Matches — Edge &gt; 8%</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="status-pill pill-green" id="signals-count">loading…</span>
+            <button class="btn-confirm" style="font-size:10px;padding:4px 10px" onclick="loadDashboardData()">↻ REFRESH</button>
+          </div>
         </div>
+        <div id="signals-blocker" style="display:none;padding:20px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--warn)"></div>
         <table>
           <thead>
             <tr>
               <th>Sport</th><th>Match</th><th>Market</th>
-              <th>Model</th><th>Book</th><th>Edge</th>
-              <th>Stake</th><th>Bookie</th><th>Mode</th><th>Action</th>
+              <th>Fair Line</th><th>Book Line</th><th>Edge</th>
+              <th>Model P</th><th>Stake</th><th>Mode</th><th>Status</th>
             </tr>
           </thead>
-          <tbody>
-            <tr>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Djokovic vs Alcaraz</td>
-              <td>Aces O/U 22.5</td>
-              <td class="mono">26.1</td><td class="mono">22.5</td>
-              <td class="mono edge-high">+12.4%</td>
-              <td class="mono edge-high">£126</td>
-              <td><span class="status-pill pill-blue">Betfair</span></td>
-              <td><span class="status-pill pill-paper" id="mode-tag-1">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Djokovic vs Alcaraz', 'OVER 22.5 Aces', 1.91, '£126', 'Betfair')">CONFIRM</button></td>
-            </tr>
-            <tr>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Sinner vs Zverev</td>
-              <td>Aces O/U 18.5</td>
-              <td class="mono">15.2</td><td class="mono">18.5</td>
-              <td class="mono edge-high">+8.1%</td>
-              <td class="mono edge-high">£84</td>
-              <td><span class="status-pill pill-blue">Smarkets</span></td>
-              <td><span class="status-pill pill-paper" id="mode-tag-2">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Sinner vs Zverev', 'UNDER 18.5 Aces', 1.88, '£84', 'Smarkets')">CONFIRM</button></td>
-            </tr>
-            <tr>
-              <td><span class="sport-tag tag-darts">DARTS</span></td>
-              <td class="mono">MVG vs Wright</td>
-              <td>180s O/U 6.5</td>
-              <td class="mono">9.2</td><td class="mono">6.5</td>
-              <td class="mono edge-med">+6.7%</td>
-              <td class="mono edge-med">£63</td>
-              <td><span class="status-pill pill-blue">Betfair</span></td>
-              <td><span class="status-pill pill-paper" id="mode-tag-3">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'MVG vs Wright', 'OVER 6.5 180s', 1.95, '£63', 'Betfair')">CONFIRM</button></td>
-            </tr>
-            <tr>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Medvedev vs Rublev</td>
-              <td>Aces O/U 15.5</td>
-              <td class="mono">17.8</td><td class="mono">15.5</td>
-              <td class="mono edge-med">+5.3%</td>
-              <td class="mono edge-med">£48</td>
-              <td><span class="status-pill pill-blue">Matchbook</span></td>
-              <td><span class="status-pill pill-paper" id="mode-tag-4">PAPER</span></td>
-              <td><button class="btn-confirm" onclick="confirmBet(this, 'Medvedev vs Rublev', 'OVER 15.5 Aces', 1.91, '£48', 'Matchbook')">CONFIRM</button></td>
-            </tr>
+          <tbody id="signals-tbody">
+            <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">Connecting to API…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1203,56 +1163,7 @@
             <tr><th>Date</th><th>Sport</th><th>Match</th><th>Bet</th><th>Edge</th><th>Stake</th><th>Odds</th><th>Bookie</th><th>Mode</th><th>Result</th><th>P&amp;L</th></tr>
           </thead>
           <tbody id="betlog-body">
-            <tr>
-              <td class="mono" style="color:var(--muted)">08 Mar</td>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Djokovic/Alcaraz</td><td>Aces OVER 22.5</td>
-              <td class="mono edge-high">+12.4%</td><td class="mono">£126</td><td class="mono">1.91</td>
-              <td><span class="status-pill pill-blue">Betfair</span></td>
-              <td><span class="status-pill pill-paper">PAPER</span></td>
-              <td><span class="status-pill pill-green">WIN</span></td>
-              <td class="mono edge-high">+3.8u</td>
-            </tr>
-            <tr>
-              <td class="mono" style="color:var(--muted)">07 Mar</td>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Sinner/Zverev</td><td>Aces UNDER 18.5</td>
-              <td class="mono edge-high">+8.1%</td><td class="mono">£84</td><td class="mono">1.88</td>
-              <td><span class="status-pill pill-blue">Smarkets</span></td>
-              <td><span class="status-pill pill-paper">PAPER</span></td>
-              <td><span class="status-pill pill-green">WIN</span></td>
-              <td class="mono edge-high">+2.5u</td>
-            </tr>
-            <tr>
-              <td class="mono" style="color:var(--muted)">06 Mar</td>
-              <td><span class="sport-tag tag-darts">DARTS</span></td>
-              <td class="mono">MVG/Wright</td><td>180s OVER 6.5</td>
-              <td class="mono edge-med">+6.7%</td><td class="mono">£63</td><td class="mono">1.95</td>
-              <td><span class="status-pill pill-blue">Betfair</span></td>
-              <td><span class="status-pill pill-paper">PAPER</span></td>
-              <td><span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span></td>
-              <td class="mono red">-2.1u</td>
-            </tr>
-            <tr>
-              <td class="mono" style="color:var(--muted)">05 Mar</td>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Medvedev/Rublev</td><td>Aces OVER 15.5</td>
-              <td class="mono edge-med">+5.3%</td><td class="mono">£48</td><td class="mono">1.91</td>
-              <td><span class="status-pill pill-blue">Matchbook</span></td>
-              <td><span class="status-pill pill-paper">PAPER</span></td>
-              <td><span class="status-pill pill-green">WIN</span></td>
-              <td class="mono edge-high">+1.5u</td>
-            </tr>
-            <tr>
-              <td class="mono" style="color:var(--muted)">04 Mar</td>
-              <td><span class="sport-tag tag-tennis">TENNIS</span></td>
-              <td class="mono">Tsitsipas/Fritz</td><td>Aces OVER 17.5</td>
-              <td class="mono edge-high">+9.2%</td><td class="mono">£93</td><td class="mono">1.93</td>
-              <td><span class="status-pill pill-blue">Betfair</span></td>
-              <td><span class="status-pill pill-paper">PAPER</span></td>
-              <td><span class="status-pill pill-green">WIN</span></td>
-              <td class="mono edge-high">+2.9u</td>
-            </tr>
+            <tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">Connecting to API…</td></tr>
           </tbody>
         </table>
       </div>
@@ -1534,14 +1445,73 @@ function updateMarket() {
 }
 
 // ── ANALYSIS ──
-function runAnalysis() {
-  const sport    = document.getElementById('sport-select').value;
-  const bookLine = parseFloat(document.getElementById('book-line').value) || 22.5;
-  const edges    = { tennis: 12.4, darts: 6.7, snooker: 0 };
-  const edge     = edges[sport] + (Math.random() * 4 - 2);
-  const el       = document.getElementById('result-edge');
-  el.textContent = (edge > 0 ? '+' : '') + edge.toFixed(1) + '%';
-  el.style.color = edge > 5 ? 'var(--accent)' : edge > 0 ? 'var(--yellow)' : 'var(--red)';
+async function runAnalysis() {
+  const sport     = document.getElementById('sport-select').value;
+  const p1        = (document.getElementById('p1').value || '').trim();
+  const p2        = (document.getElementById('p2').value || '').trim();
+  const bookLine  = parseFloat(document.getElementById('book-line').value) || 22.5;
+  const bookOdds  = parseFloat(document.querySelectorAll('.input-field')[5]?.value) || 1.91;
+
+  // Show loading state
+  const edgeEl = document.getElementById('result-edge');
+  edgeEl.textContent = '…';
+  edgeEl.style.color = 'var(--muted)';
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/analyse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        p1: p1, p2: p2, surface: 'Hard', best_of: 3,
+        book_line: bookLine, book_odds: bookOdds,
+        direction: 'UNDER', bankroll: 1000
+      })
+    });
+    const d = await resp.json();
+
+    if (d.error) {
+      edgeEl.textContent = 'ERR';
+      edgeEl.style.color = 'var(--red)';
+      document.getElementById('result-panel').querySelector('.rec-text').innerHTML =
+        `<strong style="color:var(--red)">Error:</strong> ${d.error}`;
+      return;
+    }
+
+    const edge    = d.edge;
+    const edgePct = (edge > 0 ? '+' : '') + (edge * 100).toFixed(1) + '%';
+    edgeEl.textContent = edgePct;
+    edgeEl.style.color = edge >= 0.08 ? 'var(--accent)' : edge > 0 ? 'var(--yellow)' : 'var(--red)';
+
+    // Update Kelly ring
+    const kellyEl = document.querySelector('.kelly-val');
+    if (kellyEl) kellyEl.textContent = (d.kelly_frac * 100).toFixed(1) + '%';
+
+    // Update result rows
+    const panel = document.getElementById('result-panel');
+    const rows  = panel.querySelectorAll('.result-row');
+    const set   = (i, key, val) => { if (rows[i]) { rows[i].querySelector('.result-key').textContent = key; rows[i].querySelector('.result-val').textContent = val; } };
+    set(0, 'Match',            `${d.p1.name} vs ${d.p2.name}`);
+    set(1, 'Market',           `Total Games O/U ${bookLine}`);
+    set(2, 'Model fair line',  `${d.simulation.fair_line_games} games`);
+    set(3, 'P1 ELO',           `${d.p1.elo} (${d.p1.matches || '?'} matches)`);
+    set(4, 'P2 ELO',           `${d.p2.elo} (${d.p2.matches || '?'} matches)`);
+    set(5, 'ELO gap',          `${d.abs_elo_gap.toFixed(0)} pts`);
+
+    const recEl = panel.querySelector('.rec-text');
+    if (d.qualifies) {
+      recEl.innerHTML = `<strong>BET UNDER ${bookLine} TOTAL GAMES</strong><br>
+        Edge ${edgePct} — Kelly stake £${d.stake_gbp.toFixed(0)}<br>
+        Model p=${(d.model_p*100).toFixed(1)}% vs market ${(d.market_p*100).toFixed(1)}%`;
+    } else {
+      recEl.innerHTML = `<strong style="color:var(--warn)">NO BET</strong><br>
+        ${d.reject_reason || 'Below threshold'}<br>
+        Fair line ${d.simulation.fair_line_games} vs book ${bookLine}`;
+    }
+  } catch (e) {
+    edgeEl.textContent = 'API?';
+    edgeEl.style.color = 'var(--red)';
+    console.warn('runAnalysis error:', e.message, '— Is run_server.py running?');
+  }
 }
 
 // ── PERFORMANCE DATA ──
@@ -1862,6 +1832,263 @@ function filterBetLog(sport, btn) {
 
 // ── INIT ──
 renderPerformance('day');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE API BRIDGE — connects to run_server.py (http://localhost:5000)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const API_BASE = 'http://localhost:5000';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function edgeClass(edge) {
+  return edge >= 0.10 ? 'edge-high' : edge >= 0.05 ? 'edge-med' : '';
+}
+
+function sportTag(sport) {
+  const cls = { tennis: 'tag-tennis', darts: 'tag-darts', snooker: 'tag-snooker' };
+  return `<span class="sport-tag ${cls[sport] || ''}">${sport.toUpperCase()}</span>`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso.replace(' ', 'T'));
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+function fmtPnl(val) {
+  if (val === null || val === undefined) return '<span style="color:var(--muted)">PENDING</span>';
+  const cls = val >= 0 ? 'edge-high' : 'red';
+  return `<span class="mono ${cls}">${val >= 0 ? '+' : ''}£${Math.abs(val).toFixed(2)}</span>`;
+}
+
+// ── /api/status → stat cards ───────────────────────────────────────────────
+
+async function loadStatus() {
+  try {
+    const r = await fetch(`${API_BASE}/api/status`);
+    const d = await r.json();
+
+    // Today's signals card
+    document.getElementById('stat-total-val').textContent = '—';
+    document.getElementById('stat-total-sub').textContent =
+      d.blockers.length ? d.blockers[0].split('—')[0].trim() : 'pipeline ready';
+
+    // Tennis card
+    document.getElementById('stat-tennis-val').textContent = d.matches.tennis.toLocaleString();
+    document.getElementById('stat-tennis-sub').textContent =
+      `last: ${d.last_match_date.tennis || '—'}`;
+
+    // DB health card
+    const stale = d.last_match_date.tennis && d.last_match_date.tennis < '2026-01-01';
+    document.getElementById('stat-db-val').textContent  = stale ? 'STALE' : 'OK';
+    document.getElementById('stat-db-val').style.color = stale ? 'var(--warn)' : 'var(--accent)';
+    document.getElementById('stat-db-sub').textContent  =
+      `${(d.matches.tennis + d.matches.darts + d.matches.snooker).toLocaleString()} total matches`;
+
+    // Betfair markets card
+    const bm = d.betfair_markets;
+    document.getElementById('stat-bm-val').textContent = bm.total;
+    document.getElementById('stat-bm-sub').textContent =
+      bm.total === 0 ? 'run run_presession.py' :
+      `${bm.verified} verified · ${bm.today} today`;
+
+    // Show blockers in signals area if API up but no markets
+    const blockerEl = document.getElementById('signals-blocker');
+    if (d.blockers.length > 0) {
+      blockerEl.style.display = 'block';
+      blockerEl.innerHTML = '⚠ ' + d.blockers.map(b => `<div>${b}</div>`).join('');
+    } else {
+      blockerEl.style.display = 'none';
+    }
+
+    return d;
+  } catch (e) {
+    console.warn('API offline:', e.message);
+    ['stat-total-val','stat-tennis-val','stat-db-val','stat-bm-val'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = '—'; el.style.color = 'var(--muted)'; }
+    });
+    document.getElementById('stat-total-sub').textContent  = 'API offline — start run_server.py';
+    document.getElementById('stat-tennis-sub').textContent = '';
+    document.getElementById('stat-db-sub').textContent     = '';
+    document.getElementById('stat-bm-sub').textContent     = '';
+    const blockerEl = document.getElementById('signals-blocker');
+    blockerEl.style.display = 'block';
+    blockerEl.innerHTML = '⚠ API server not running. Start with: <code>PYTHONUTF8=1 python run_server.py</code>';
+    return null;
+  }
+}
+
+// ── /api/signals → edge table ─────────────────────────────────────────────
+
+async function loadSignals(date) {
+  const tbody = document.getElementById('signals-tbody');
+  const badge = document.getElementById('signals-count');
+
+  if (!date) {
+    // Fall back to latest date in DB
+    try {
+      const r = await fetch(`${API_BASE}/api/latest-date?sport=tennis`);
+      const d = await r.json();
+      date = d.date;
+    } catch (e) {
+      return;
+    }
+  }
+
+  try {
+    const r   = await fetch(`${API_BASE}/api/signals?date=${date}&sport=tennis`);
+    const d   = await r.json();
+
+    if (d.error) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--red);padding:20px">${d.error}</td></tr>`;
+      return;
+    }
+
+    // Stat card update
+    const betting = d.signals.filter(s => s.stake_gbp > 0);
+    document.getElementById('stat-total-val').textContent = betting.length || d.total;
+    document.getElementById('stat-total-sub').textContent =
+      `${betting.length} bets · ${date}`;
+
+    badge.textContent = `${betting.length} bet${betting.length !== 1 ? 's' : ''} · ${d.total} signals`;
+    badge.className   = `status-pill ${betting.length > 0 ? 'pill-green' : 'pill-orange'}`;
+
+    document.getElementById('signals-title').textContent =
+      betting.length > 0 ? 'Edge Opportunities — Real Lines' :
+      d.total > 0         ? `Signals for ${date} — Synthetic (no market lines yet)` :
+                            `No matches found for ${date}`;
+
+    if (d.total === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No matches on ${date} — try a different date</td></tr>`;
+      return;
+    }
+
+    // Render rows — show bets first, then synthetic previews
+    const rows = d.signals.sort((a, b) => b.stake_gbp - a.stake_gbp || b.edge - a.edge);
+
+    tbody.innerHTML = rows.map(s => {
+      const isBet   = s.stake_gbp > 0;
+      const isSynth = s.synthetic_line;
+      const rowStyle = s.reject_reason ? 'opacity:0.45' : '';
+
+      const edgeCls = edgeClass(s.edge);
+      const edgeTxt = s.edge !== 0 ? (s.edge > 0 ? '+' : '') + (s.edge * 100).toFixed(1) + '%' : '—';
+
+      const modePill = isBet
+        ? `<span class="status-pill pill-green">BET</span>`
+        : isSynth
+        ? `<span class="status-pill" style="background:rgba(255,209,102,0.1);color:var(--paper);border:1px solid rgba(255,209,102,0.2);font-size:9px">NO LINE</span>`
+        : `<span class="status-pill" style="background:rgba(102,102,112,0.1);color:var(--muted);border:1px solid rgba(102,102,112,0.2);font-size:9px">SKIP</span>`;
+
+      const market = s.market_type === 'total_games' ? `Games O/U ${s.line}` :
+                     s.market_type === 'total_sets'  ? `Sets O/U ${s.line}` :
+                     s.market_type === 'first_set'   ? `Set 1 Winner` :
+                     s.market_type;
+
+      return `<tr style="${rowStyle}">
+        <td>${sportTag(s.sport)}</td>
+        <td class="mono">${s.match_id}</td>
+        <td>${market}</td>
+        <td class="mono">${s.simulation ? s.simulation.fair_line_games : '—'}</td>
+        <td class="mono">${s.line || '—'}</td>
+        <td class="mono ${edgeCls}">${edgeTxt}</td>
+        <td class="mono">${s.model_p ? (s.model_p * 100).toFixed(1) + '%' : '—'}</td>
+        <td class="mono ${isBet ? edgeCls : ''}">${isBet ? '£' + s.stake_gbp.toFixed(0) : '—'}</td>
+        <td>${modePill}</td>
+        <td>${s.reject_reason ? `<span style="color:var(--muted);font-size:10px">${s.reject_reason.split('(')[0]}</span>` : (isBet ? '<span class="status-pill pill-green" style="font-size:9px">READY</span>' : '')}</td>
+      </tr>`;
+    }).join('');
+
+  } catch (e) {
+    badge.textContent = 'API offline';
+    badge.className   = 'status-pill pill-orange';
+    tbody.innerHTML   = `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">API server offline — start run_server.py</td></tr>`;
+  }
+}
+
+// ── /api/ledger → bet log ─────────────────────────────────────────────────
+
+async function loadLedger() {
+  try {
+    const r   = await fetch(`${API_BASE}/api/ledger?limit=50`);
+    const d   = await r.json();
+
+    const tbody = document.getElementById('betlog-body');
+    const badge = document.getElementById('betlog-summary');
+
+    if (d.summary) {
+      const pnl = d.summary.total_pnl;
+      const roi = d.summary.roi;
+      badge.textContent = d.summary.total_bets === 0
+        ? 'No bets yet'
+        : `${d.summary.total_bets} bets · ${pnl >= 0 ? '+' : ''}£${pnl.toFixed(0)} (${(roi * 100).toFixed(1)}% ROI)`;
+      badge.className = `status-pill ${pnl > 0 ? 'pill-green' : pnl < 0 ? 'pill-orange' : 'pill-paper'}`;
+    }
+
+    if (d.rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">No bets logged yet — run run_presession.py to generate recommendations</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = d.rows.map(row => {
+      const sport = row.sport || '';
+      const tagCls = sport === 'tennis' ? 'tag-tennis' : sport === 'darts' ? 'tag-darts' : 'tag-snooker';
+      const p1  = (row.player1_id || '').replace(/^[A-Z]+-/, '').replace(/-[A-Z]$/, '');
+      const p2  = (row.player2_id || '').replace(/^[A-Z]+-/, '').replace(/-[A-Z]$/, '');
+      const match = p1 && p2 ? `${p1} / ${p2}` : row.match_id;
+
+      const statusPill = row.status === 'WON'
+        ? `<span class="status-pill pill-green">WIN</span>`
+        : row.status === 'LOST'
+        ? `<span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span>`
+        : `<span class="status-pill pill-paper">${row.status}</span>`;
+
+      const modePill = row.mode === 'LIVE'
+        ? `<span class="status-pill pill-green">LIVE</span>`
+        : `<span class="status-pill pill-paper">PAPER</span>`;
+
+      return `<tr>
+        <td class="mono" style="color:var(--muted)">${fmtDate(row.placed_at)}</td>
+        <td>${sportTag(sport)}</td>
+        <td class="mono">${match}</td>
+        <td>${row.bet_direction} @ ${row.line}</td>
+        <td class="mono ${edgeClass(0.09)}">—</td>
+        <td class="mono">£${(row.stake_gbp || 0).toFixed(0)}</td>
+        <td class="mono">${(row.odds_taken || 0).toFixed(2)}</td>
+        <td><span class="status-pill pill-blue">Betfair</span></td>
+        <td>${modePill}</td>
+        <td>${statusPill}</td>
+        <td>${fmtPnl(row.profit_loss_gbp)}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('betlog-body').innerHTML =
+      `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">API offline</td></tr>`;
+  }
+}
+
+// ── Init + periodic refresh ────────────────────────────────────────────────
+
+async function loadDashboardData() {
+  const statusData = await loadStatus();
+  const latestDate = statusData
+    ? statusData.last_match_date?.tennis
+    : null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  await loadSignals(today !== latestDate ? latestDate : today);
+  await loadLedger();
+}
+
+// Run on page load
+loadDashboardData();
+
+// Refresh every 60 seconds if page is visible
+setInterval(() => {
+  if (!document.hidden) loadDashboardData();
+}, 60_000);
 
 // ── CALENDAR ──────────────────────────────────────────────────────────────
 (function() {
