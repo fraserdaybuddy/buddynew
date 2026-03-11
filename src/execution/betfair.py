@@ -24,7 +24,7 @@ from typing import Optional
 log = logging.getLogger("betfair")
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
-LOGIN_URL   = "https://identitysso.betfair.com/api/login"
+LOGIN_URL   = "https://identitysso-cert.betfair.com/api/certlogin"
 API_URL     = "https://api.betfair.com/exchange/betting/rest/v1.0"
 KEEPALIVE   = "https://identitysso.betfair.com/api/keepAlive"
 LOGOUT_URL  = "https://identitysso.betfair.com/api/logout"
@@ -61,16 +61,19 @@ def _load_env():
                         os.environ[key.strip()] = val.strip()
 
 
-def _credentials() -> tuple[str, str, str]:
+def _credentials() -> tuple[str, str, str, str, str]:
     _load_env()
     username = os.environ.get("BETFAIR_USERNAME", "")
     password = os.environ.get("BETFAIR_PASSWORD", "")
     app_key  = os.environ.get("BETFAIR_APP_KEY", "")
-    if not all([username, password, app_key]):
+    cert_crt = os.environ.get("BETFAIR_CERT_CRT", "")
+    cert_key = os.environ.get("BETFAIR_CERT_KEY", "")
+    if not all([username, password, app_key, cert_crt, cert_key]):
         raise RuntimeError(
-            "BETFAIR_USERNAME / BETFAIR_PASSWORD / BETFAIR_APP_KEY not set in .env"
+            "BETFAIR_USERNAME / BETFAIR_PASSWORD / BETFAIR_APP_KEY / "
+            "BETFAIR_CERT_CRT / BETFAIR_CERT_KEY not set in .env"
         )
-    return username, password, app_key
+    return username, password, app_key, cert_crt, cert_key
 
 
 # ── Session management ────────────────────────────────────────────────────────
@@ -86,7 +89,7 @@ class BetfairSession:
         self._app_key: Optional[str] = None
 
     def login(self) -> str:
-        username, password, app_key = _credentials()
+        username, password, app_key, cert_crt, cert_key = _credentials()
         self._app_key = app_key
 
         resp = requests.post(
@@ -94,15 +97,16 @@ class BetfairSession:
             data={"username": username, "password": password},
             headers={"X-Application": app_key,
                      "Content-Type": "application/x-www-form-urlencoded"},
+            cert=(cert_crt, cert_key),
             timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
 
-        if data.get("status") != "SUCCESS":
-            raise RuntimeError(f"Betfair login failed: {data.get('error', 'unknown')}")
+        if data.get("loginStatus") != "SUCCESS":
+            raise RuntimeError(f"Betfair login failed: {data.get('loginStatus', 'unknown')}")
 
-        self._token = data["token"]
+        self._token = data["sessionToken"]
         log.info("[betfair] Logged in successfully")
         return self._token
 
