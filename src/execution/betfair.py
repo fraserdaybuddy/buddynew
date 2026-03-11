@@ -263,6 +263,62 @@ def get_settled_markets(
     return session.post("listClearedOrders", body)
 
 
+# ── Bet-level settlement ───────────────────────────────────────────────────────
+
+ACCOUNTS_URL = "https://api.betfair.com/exchange/account/rest/v1.0"
+
+
+def list_cleared_orders(
+    session:      BetfairSession,
+    bet_status:   str = "SETTLED",
+    settled_from: Optional[str] = None,
+    settled_to:   Optional[str] = None,
+    max_results:  int = 1000,
+) -> list[dict]:
+    """
+    Pull settled orders at BET level (not market level).
+    Returns list of ClearedOrderSummary dicts with betId, profit, settledDate.
+    """
+    body: dict = {
+        "betStatus":            bet_status,
+        "groupBy":              "BET",
+        "includeItemDescription": True,
+        "maxResults":           max_results,
+    }
+    if settled_from or settled_to:
+        body["settledDateRange"] = {}
+        if settled_from:
+            body["settledDateRange"]["from"] = settled_from
+        if settled_to:
+            body["settledDateRange"]["to"] = settled_to
+
+    result = session.post("listClearedOrders", body)
+    # Response is {"clearedOrders": [...], "moreAvailable": bool}
+    if isinstance(result, dict):
+        return result.get("clearedOrders", [])
+    return result
+
+
+def get_account_funds(session: BetfairSession) -> dict:
+    """
+    Pull current account balance from Betfair Accounts API.
+    Returns dict with availableToBetBalance, exposure, retainedCommission.
+    """
+    url = f"{ACCOUNTS_URL}/getAccountFunds/"
+    resp = requests.post(
+        url,
+        json={"wallet": "UK wallet"},
+        headers=session._headers(),
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# Alias so new data modules can import BetfairClient
+BetfairClient = BetfairSession
+
+
 # ── Historical data via Exchange Stream API ────────────────────────────────────
 
 def search_totals_markets(
@@ -315,8 +371,8 @@ def list_all_markets(
             "marketStartTime": {"from": from_date, "to": to_date},
         },
         "marketProjection": ["MARKET_START_TIME", "EVENT", "RUNNER_DESCRIPTION",
-                             "MARKET_CATALOGUE"],
-        "maxResults": "500",
+                             "MARKET_DESCRIPTION"],
+        "maxResults": 200,
         "sort": "FIRST_TO_START",
     }
     return session.post("listMarketCatalogue", body)
@@ -385,7 +441,7 @@ def main():
         # Collect unique market types and counts
         type_counts = {}
         for m in markets:
-            mt = m.get("marketType", "UNKNOWN")
+            mt = m.get("description", {}).get("marketType", "UNKNOWN")
             type_counts[mt] = type_counts.get(mt, 0) + 1
 
         print(f"Found {len(markets)} markets, {len(type_counts)} unique market types:\n")
@@ -398,7 +454,7 @@ def main():
         print(f"\nSample markets (first 15):")
         for m in markets[:15]:
             event = m.get("event", {})
-            mtype = m.get("marketType", "?")
+            mtype = m.get("description", {}).get("marketType", "?")
             print(f"  {m.get('marketId'):<14}  {mtype:<30}  {m.get('marketName'):<35}  "
                   f"{event.get('name','')}")
         session.logout()

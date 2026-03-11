@@ -1,0 +1,18 @@
+# JOB-006 Post-match pipeline cron entries
+# Add to crontab with: crontab -e
+# Or for systemd: see cron_systemd/ directory
+#
+# Assumes: server at /home/ubuntu/sports-betting, logs/ dir exists
+# All times UTC. Run order: results → stats → account → feedback
+
+# Pull yesterday's settled bets from Betfair
+0  2 * * *  cd /home/ubuntu/sports-betting && PYTHONUTF8=1 python -m src.data.results_puller  >> logs/results.log 2>&1
+
+# Pull recent Sackmann rows → match_results + model_errors
+15 2 * * *  cd /home/ubuntu/sports-betting && PYTHONUTF8=1 python -m src.data.stats_puller    >> logs/stats.log 2>&1
+
+# Snapshot Betfair account balance
+30 2 * * *  cd /home/ubuntu/sports-betting && PYTHONUTF8=1 python -m src.data.account_sync    >> logs/account.log 2>&1
+
+# Bias check + daily summary (after all three pullers have run)
+0  6 * * *  cd /home/ubuntu/sports-betting && PYTHONUTF8=1 python -m src.data.model_feedback  >> logs/feedback.log 2>&1

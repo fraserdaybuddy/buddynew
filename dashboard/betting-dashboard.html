@@ -732,6 +732,9 @@
       <div class="nav-item" onclick="showPage('backtest', this)">
         <div class="nav-dot"></div> Backtest
       </div>
+      <div class="nav-item" onclick="showPage('calendar', this)">
+        <div class="nav-dot"></div> Calendar
+      </div>
     </div>
 
     <div class="nav-section">
@@ -1255,8 +1258,184 @@
       </div>
     </div>
 
+  <!-- ── CALENDAR PAGE ─────────────────────────────────────────────────── -->
+  <div id="page-calendar" class="page">
+
+    <style>
+      /* Scoped to #page-calendar — no global overrides */
+      #page-calendar {
+        --tennis:       #4488ff;
+        --tennis-dim:   rgba(68,136,255,0.12);
+        --darts:        #ff8c35;
+        --darts-dim:    rgba(255,140,53,0.12);
+        --snooker:      #9966ff;
+        --snooker-dim:  rgba(153,102,255,0.12);
+        --snooker-glow: rgba(153,102,255,0.25);
+        --cal-top:      #00ff87;
+        --cal-good:     #44dd88;
+        --cal-now:      rgba(255,209,102,0.15);
+        --cal-now-border: #ffd166;
+        --cal-skip:     #666670;
+      }
+
+      #page-calendar .cal-legend {
+        display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap;
+      }
+      #page-calendar .cal-legend-group {
+        display: flex; align-items: center; gap: 6px;
+      }
+      #page-calendar .cal-legend-dot {
+        width: 10px; height: 10px; border-radius: 2px;
+      }
+      #page-calendar .cal-legend-label {
+        color: var(--muted); font-size: 11px;
+      }
+
+      #page-calendar .cal-priority-legend {
+        display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+      }
+      #page-calendar .cal-pl {
+        display: flex; align-items: center; gap: 5px;
+        font-size: 11px; color: var(--muted);
+      }
+      #page-calendar .cal-pl-badge {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px; padding: 1px 5px;
+        border-radius: 3px; font-weight: 600;
+      }
+      #page-calendar .cal-pl-badge.top   { background: rgba(0,255,135,0.15); color: var(--cal-top); }
+      #page-calendar .cal-pl-badge.good  { background: rgba(68,221,136,0.12); color: var(--cal-good); }
+      #page-calendar .cal-pl-badge.paper { background: rgba(255,209,102,0.12); color: var(--paper); }
+      #page-calendar .cal-pl-badge.skip  { background: rgba(102,102,112,0.12); color: var(--cal-skip); }
+
+      #page-calendar .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      @media (max-width: 1100px) { #page-calendar .cal-grid { grid-template-columns: repeat(2, 1fr); } }
+
+      #page-calendar .cal-month {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px;
+        min-height: 80px;
+      }
+      #page-calendar .cal-month-title {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px; font-weight: 600;
+        color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 10px; padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      #page-calendar .cal-event {
+        padding: 6px 8px; border-radius: 4px;
+        margin-bottom: 5px; cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: filter 0.15s;
+      }
+      #page-calendar .cal-event:hover { filter: brightness(1.2); }
+      #page-calendar .cal-event:last-child { margin-bottom: 0; }
+
+      #page-calendar .cal-event.tennis  { background: var(--tennis-dim);  border-left-color: var(--tennis);  }
+      #page-calendar .cal-event.darts   { background: var(--darts-dim);   border-left-color: var(--darts);   }
+      #page-calendar .cal-event.snooker { background: var(--snooker-dim); border-left-color: var(--snooker); }
+      #page-calendar .cal-event.now     { background: var(--cal-now); border-left-color: var(--cal-now-border); box-shadow: 0 0 0 1px var(--cal-now-border); }
+      #page-calendar .cal-event.soon    { border-left-style: dashed; }
+
+      #page-calendar .cal-event-header {
+        display: flex; justify-content: space-between;
+        align-items: flex-start; gap: 6px;
+      }
+      #page-calendar .cal-event-name {
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 600; font-size: 11px; line-height: 1.3; flex: 1;
+      }
+      #page-calendar .cal-event.tennis  .cal-event-name { color: var(--tennis);  }
+      #page-calendar .cal-event.darts   .cal-event-name { color: var(--darts);   }
+      #page-calendar .cal-event.snooker .cal-event-name { color: var(--snooker); }
+      #page-calendar .cal-event.now     .cal-event-name { color: var(--cal-now-border); }
+
+      #page-calendar .cal-priority {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 9px; font-weight: 700;
+        padding: 1px 4px; border-radius: 3px;
+        white-space: nowrap; flex-shrink: 0; margin-top: 1px;
+      }
+      #page-calendar .cal-priority.top    { background: rgba(0,255,135,0.15);   color: var(--cal-top); }
+      #page-calendar .cal-priority.good   { background: rgba(68,221,136,0.12);  color: var(--cal-good); }
+      #page-calendar .cal-priority.paper  { background: rgba(255,209,102,0.12); color: var(--paper); }
+      #page-calendar .cal-priority.skip   { background: rgba(102,102,112,0.12); color: var(--cal-skip); }
+
+      #page-calendar .cal-event-meta {
+        font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4;
+      }
+      #page-calendar .cal-event-dates { color: var(--muted); font-size: 10px; }
+      #page-calendar .cal-month-empty { color: var(--muted); font-size: 10px; padding: 4px 0; }
+
+      /* Tooltip — position:fixed so it escapes the scrolling main */
+      .cal-tooltip {
+        display: none;
+        position: fixed; z-index: 9999;
+        background: var(--surface);
+        border: 1px solid var(--border-bright);
+        border-radius: 6px;
+        padding: 12px 14px;
+        min-width: 240px; max-width: 300px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+        pointer-events: none;
+        font-family: 'IBM Plex Mono', monospace;
+      }
+      .cal-tooltip.visible { display: block; }
+      .cal-tooltip-title  { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+      .cal-tooltip-row    { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: 11px; }
+      .cal-tooltip-label  { color: var(--muted); }
+      .cal-tooltip-val    { color: var(--text); font-weight: 500; text-align: right; }
+      .cal-tooltip-hr     { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    </style>
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">Tournament Calendar</div>
+        <div class="page-sub">2026 · All three sports · Amber = active or next 30 days · Click events for details</div>
+      </div>
+    </div>
+
+    <div class="cal-legend">
+      <div class="cal-legend-group">
+        <div class="cal-legend-dot" style="background:var(--tennis)"></div>
+        <span class="cal-legend-label">Tennis (ATP/WTA)</span>
+      </div>
+      <div class="cal-legend-group">
+        <div class="cal-legend-dot" style="background:var(--darts)"></div>
+        <span class="cal-legend-label">Darts (PDC)</span>
+      </div>
+      <div class="cal-legend-group">
+        <div class="cal-legend-dot" style="background:var(--snooker)"></div>
+        <span class="cal-legend-label">Snooker (WST)</span>
+      </div>
+    </div>
+
+    <div class="cal-priority-legend">
+      <div class="cal-pl"><span class="cal-pl-badge top">TOP</span>Best signal + liquidity</div>
+      <div class="cal-pl"><span class="cal-pl-badge good">GOOD</span>Strong signal</div>
+      <div class="cal-pl"><span class="cal-pl-badge paper">PAPER</span>Paper trade only</div>
+      <div class="cal-pl"><span class="cal-pl-badge skip">SKIP</span>Weak signal / wrong format</div>
+    </div>
+
+    <div class="cal-grid" id="cal-grid"></div>
+
+  </div>
+  <!-- ── END CALENDAR PAGE ──────────────────────────────────────────────── -->
+
   </main>
 </div>
+
+<!-- Calendar tooltip — outside .main so position:fixed works cleanly -->
+<div class="cal-tooltip" id="cal-tooltip"></div>
 
 <script>
 // ── STATE ──
@@ -1683,6 +1862,185 @@ function filterBetLog(sport, btn) {
 
 // ── INIT ──
 renderPerformance('day');
+
+// ── CALENDAR ──────────────────────────────────────────────────────────────
+(function() {
+  const CAL_TODAY    = new Date();
+  CAL_TODAY.setHours(0,0,0,0);
+  const CAL_SOON_END = new Date(CAL_TODAY);
+  CAL_SOON_END.setDate(CAL_TODAY.getDate() + 30);
+
+  const CAL_EVENTS = [
+    // JANUARY
+    { sport:"tennis",  start:"2026-01-18", end:"2026-02-01",  name:"Australian Open",           surface:"Hard",  format:"BO5 men / BO3 women", tier:"SLAM",           markets:"Total Games, Number of Sets", priority:"good",  note:"Great BO5 signal. ELO warm on hard." },
+    { sport:"snooker", start:"2026-01-13", end:"2026-01-18",  name:"Masters",                   surface:null,    format:"Invitational BO17–BO19", tier:"INVITATIONAL", markets:"Total Frames (verify)",       priority:"paper", note:"Top-16 invitational. Long format but unranked." },
+    { sport:"darts",   start:"2026-01-03", end:"2026-01-03",  name:"PDC World Final",           surface:null,    format:"BO13 final (complete)",   tier:"MAJOR",        markets:"Total 180s",                  priority:"skip",  note:"Already complete." },
+    // FEBRUARY
+    { sport:"tennis",  start:"2026-02-08", end:"2026-02-14",  name:"Qatar Open WTA",            surface:"Hard",  format:"BO3 women",            tier:"WTA1000",         markets:"Total Games, Number of Sets", priority:"paper", note:"WTA hard court. Less ELO depth than ATP." },
+    { sport:"tennis",  start:"2026-02-15", end:"2026-02-21",  name:"Dubai WTA",                 surface:"Hard",  format:"BO3 women",            tier:"WTA1000",         markets:"Total Games, Number of Sets", priority:"paper", note:"WTA hard. Paper trade to build record." },
+    { sport:"snooker", start:"2026-02-02", end:"2026-02-08",  name:"Welsh Open",                surface:null,    format:"BO7–BO11 F",           tier:"RANKING",         markets:"Total Frames (verify)",       priority:"paper", note:"Short format early rounds. SF/F only for OVER signal." },
+    { sport:"snooker", start:"2026-02-16", end:"2026-02-22",  name:"Players Championship",      surface:null,    format:"BO9–BO11 F",           tier:"RANKING",         markets:"Total Frames (verify)",       priority:"paper", note:"Short formats. Final only." },
+    { sport:"darts",   start:"2026-02-06", end:"2026-03-02",  name:"Premier League Darts",      surface:null,    format:"BO12 legs (Thurs weekly)", tier:"MAJOR",       markets:"Total 180s",                  priority:"good",  note:"16 nights weekly. Consistent format = strong sample." },
+    // MARCH
+    { sport:"snooker", start:"2026-03-02", end:"2026-03-08",  name:"Tour Championship",         surface:null,    format:"BO11–BO13 F",          tier:"RANKING",         markets:"Total Frames (verify)",       priority:"paper", note:"Top-16 rankings. Final is BO13." },
+    { sport:"darts",   start:"2026-03-06", end:"2026-03-08",  name:"UK Open",                   surface:null,    format:"BO7–BO11 F",           tier:"MAJOR",           markets:"Total 180s",                  priority:"good",  note:"128-player open format. Multiple rounds." },
+    { sport:"tennis",  start:"2026-03-04", end:"2026-03-15",  name:"Indian Wells Masters",      surface:"Hard",  format:"BO3 / BO5 men QF+",    tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets, Set Winner", priority:"good", note:"LIVE NOW. 228 Number of Sets markets active on Exchange." },
+    // APRIL
+    { sport:"tennis",  start:"2026-03-17", end:"2026-03-29",  name:"Miami Open",                surface:"Hard",  format:"BO3",                  tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets", priority:"good",  note:"Follows Indian Wells. Same surface. Strong ELO." },
+    { sport:"tennis",  start:"2026-04-06", end:"2026-04-12",  name:"Monte Carlo Masters",       surface:"Clay",  format:"BO3 men",              tier:"M1000",           markets:"Total Games, Number of Sets", priority:"good",  note:"Clay opener. Big servers disadvantaged = fewer aces." },
+    { sport:"tennis",  start:"2026-04-13", end:"2026-04-19",  name:"Barcelona Open",            surface:"Clay",  format:"BO3 men",              tier:"ATP500",          markets:"Total Games, Number of Sets", priority:"good",  note:"Clay. UNDER bias observed." },
+    { sport:"tennis",  start:"2026-04-20", end:"2026-04-26",  name:"Madrid Masters",            surface:"Clay",  format:"BO3",                  tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets", priority:"good",  note:"Altitude slows play. Good sample size." },
+    { sport:"snooker", start:"2026-04-06", end:"2026-04-15",  name:"World Championship Qualifying", surface:null, format:"Various",             tier:"QUALIFYING",      markets:"N/A",                         priority:"skip",  note:"No major markets." },
+    // MAY
+    { sport:"tennis",  start:"2026-05-04", end:"2026-05-10",  name:"Rome Masters",              surface:"Clay",  format:"BO3",                  tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets", priority:"good",  note:"Final clay warm-up before RG." },
+    { sport:"tennis",  start:"2026-05-24", end:"2026-06-07",  name:"Roland Garros",             surface:"Clay",  format:"BO5 men / BO3 women",  tier:"SLAM",            markets:"Total Games, Number of Sets", priority:"top",   note:"TOP TARGET. BO5 clay = maximum games signal. Advantage-set rules tracked." },
+    { sport:"snooker", start:"2026-04-18", end:"2026-05-04",  name:"World Snooker Championship",surface:null,    format:"BO19 R1 → BO35 Final", tier:"BIGGEST",         markets:"Total Frames (verify)",       priority:"top",   note:"TOP TARGET. BO35 final = strongest OVER signal. 100% over naive at SF/F+." },
+    { sport:"darts",   start:"2026-05-28", end:"2026-06-07",  name:"Premier League Finals",     surface:null,    format:"BO12 legs",            tier:"MAJOR",           markets:"Total 180s",                  priority:"good",  note:"Top-8 playoff. High intensity." },
+    // JUNE
+    { sport:"tennis",  start:"2026-06-15", end:"2026-06-21",  name:"Halle / Queen's Club",      surface:"Grass", format:"BO3 men",              tier:"ATP500",          markets:"Total Games, Number of Sets", priority:"good",  note:"Wimbledon warm-up. Big servers dominate on grass." },
+    { sport:"darts",   start:"2026-06-11", end:"2026-06-14",  name:"World Cup of Darts",        surface:null,    format:"Pairs / Nations",      tier:"MAJOR",           markets:"Total 180s (pairs sum)",      priority:"skip",  note:"Pairs format changes signal. Skip until calibrated." },
+    // JULY
+    { sport:"tennis",  start:"2026-06-22", end:"2026-07-05",  name:"Wimbledon",                 surface:"Grass", format:"BO5 men / BO3 women",  tier:"SLAM",            markets:"Total Games, Number of Sets", priority:"top",   note:"TOP TARGET. BO5 grass = serve dominance + OVER signal. High liquidity." },
+    { sport:"tennis",  start:"2026-07-13", end:"2026-07-19",  name:"Hamburg Open",              surface:"Clay",  format:"BO3 men",              tier:"ATP500",          markets:"Total Games, Number of Sets", priority:"good",  note:"Clay 500. Good follow-on for clay specialists." },
+    { sport:"darts",   start:"2026-07-18", end:"2026-07-26",  name:"World Matchplay",           surface:null,    format:"BO19–BO37 F (legs)",   tier:"MAJOR",           markets:"Total 180s",                  priority:"top",   note:"TOP TARGET. Long leg formats = best 180s signal. Winter Gardens Blackpool." },
+    // AUGUST
+    { sport:"tennis",  start:"2026-08-10", end:"2026-08-16",  name:"Rogers Cup",                surface:"Hard",  format:"BO3",                  tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets", priority:"good",  note:"US Open warm-up series." },
+    { sport:"tennis",  start:"2026-08-17", end:"2026-08-23",  name:"Cincinnati Masters",        surface:"Hard",  format:"BO3",                  tier:"M1000 + WTA1000", markets:"Total Games, Number of Sets", priority:"good",  note:"Fast hard courts. OVER bias possible for big servers." },
+    { sport:"snooker", start:"2026-08-31", end:"2026-09-06",  name:"British Open",              surface:null,    format:"BO7–BO9 F",            tier:"RANKING",         markets:"Total Frames (verify)",       priority:"paper", note:"Short format. Final only." },
+    { sport:"darts",   start:"2026-08-27", end:"2026-09-06",  name:"World Grand Prix",          surface:null,    format:"BO5–BO9 F (double start)", tier:"MAJOR",       markets:"Total 180s",                  priority:"good",  note:"Double-start reduces scoring. Watch for UNDER bias vs standard events." },
+    // SEPTEMBER
+    { sport:"tennis",  start:"2026-08-30", end:"2026-09-13",  name:"US Open",                   surface:"Hard",  format:"BO5 men / BO3 women",  tier:"SLAM",            markets:"Total Games, Number of Sets", priority:"good",  note:"BO5 slam on fast hard courts. Behind RG/Wimbledon on clay/grass signal." },
+    { sport:"tennis",  start:"2026-09-21", end:"2026-09-27",  name:"Laver Cup",                 surface:"Hard",  format:"BO3 team exhibition",  tier:"EXHIBITION",      markets:"N/A",                         priority:"skip",  note:"Team exhibition. No standard signal structure." },
+    { sport:"snooker", start:"2026-09-07", end:"2026-09-13",  name:"English Open",              surface:null,    format:"BO7–BO9 F",            tier:"RANKING",         markets:"Total Frames (verify)",       priority:"paper", note:"Short format. SF/F only." },
+    { sport:"darts",   start:"2026-09-17", end:"2026-09-20",  name:"World Series Finals",       surface:null,    format:"BO11–BO13 F",          tier:"MAJOR",           markets:"Total 180s",                  priority:"good",  note:"Top-8 international. Amsterdam." },
+    // OCTOBER
+    { sport:"tennis",  start:"2026-10-12", end:"2026-10-18",  name:"Shanghai Masters",          surface:"Hard",  format:"BO3 men",              tier:"M1000",           markets:"Total Games, Number of Sets", priority:"good",  note:"Indoor hard. Strong historical data in DB." },
+    { sport:"darts",   start:"2026-10-29", end:"2026-11-01",  name:"European Championship",     surface:null,    format:"BO11–BO13 F",          tier:"MAJOR",           markets:"Total 180s",                  priority:"good",  note:"Top-32. Good sample." },
+    // NOVEMBER
+    { sport:"tennis",  start:"2026-11-02", end:"2026-11-08",  name:"Paris Masters",             surface:"Hard",  format:"BO3 men",              tier:"M1000",           markets:"Total Games, Number of Sets", priority:"good",  note:"Indoor fast hard. Server-friendly." },
+    { sport:"tennis",  start:"2026-11-09", end:"2026-11-15",  name:"ATP Finals Turin",          surface:"Hard",  format:"BO3 RR + KO",          tier:"YEAR-END",        markets:"Total Games, Number of Sets", priority:"good",  note:"Top-8 year-end. RR format = more matches." },
+    { sport:"tennis",  start:"2026-11-07", end:"2026-11-14",  name:"WTA Finals Riyadh",         surface:"Hard",  format:"BO3 RR + KO",          tier:"YEAR-END",        markets:"Total Games, Number of Sets", priority:"paper", note:"Top-8 WTA. Paper for now — building WTA ELO depth." },
+    { sport:"darts",   start:"2026-11-12", end:"2026-11-15",  name:"Players Championship Finals",surface:null,   format:"BO11–BO21 F",          tier:"MAJOR",           markets:"Total 180s",                  priority:"good",  note:"Top-64 tour card holders. BO21 final = strong OVER signal." },
+    { sport:"snooker", start:"2026-11-27", end:"2026-12-06",  name:"UK Championship",           surface:null,    format:"BO11–BO17 F",          tier:"TRIPLE CROWN",    markets:"Total Frames (verify)",       priority:"good",  note:"Triple Crown ranking. Long final. Second biggest after Worlds." },
+    // DECEMBER
+    { sport:"darts",   start:"2026-11-19", end:"2026-12-06",  name:"Grand Slam of Darts",       surface:null,    format:"BO12 RR / BO19 KO / BO31 F", tier:"MAJOR",    markets:"Total 180s",                  priority:"top",   note:"TOP TARGET. 48-player field. BO31 final = max legs = max 180s signal." },
+    { sport:"snooker", start:"2026-12-09", end:"2026-12-12",  name:"Shoot Out",                 surface:null,    format:"Single frame, 10-min clock", tier:"RANKING",   markets:"N/A",                         priority:"skip",  note:"One frame per match. No O/U signal possible." },
+    { sport:"darts",   start:"2026-12-11", end:"2027-01-03",  name:"PDC World Championship 26/27", surface:null, format:"BO3–BO13 F (Ally Pally)", tier:"MAJOR",       markets:"Total 180s",                  priority:"top",   note:"TOP TARGET. Worlds = maximum 180s liquidity. BO13 final is pinnacle." },
+  ];
+
+  const CAL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  function calParseDate(s) { const d = new Date(s + "T00:00:00"); d.setHours(0,0,0,0); return d; }
+
+  function calInMonth(ev, month) {
+    const s = calParseDate(ev.start), e = calParseDate(ev.end);
+    const ms = new Date(2026, month, 1), me = new Date(2026, month + 1, 0);
+    return s <= me && e >= ms;
+  }
+
+  function calFmtDates(start, end) {
+    const s = calParseDate(start), e = calParseDate(end);
+    const mo = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    if (s.getMonth() === e.getMonth()) return s.getDate() + '–' + e.getDate() + ' ' + mo[s.getMonth()];
+    return s.getDate() + ' ' + mo[s.getMonth()] + ' – ' + e.getDate() + ' ' + mo[e.getMonth()];
+  }
+
+  function calIsNow(ev)  { const s = calParseDate(ev.start), e = calParseDate(ev.end); return CAL_TODAY >= s && CAL_TODAY <= e; }
+  function calIsSoon(ev) { const s = calParseDate(ev.start); return s > CAL_TODAY && s <= CAL_SOON_END; }
+
+  function calSportColor(sport) {
+    const el = document.getElementById('page-calendar');
+    if (!el) return '#888';
+    const st = getComputedStyle(el);
+    return st.getPropertyValue('--' + sport).trim() || '#888';
+  }
+
+  function calPriorityLabel(p) { return {top:'TOP',good:'GOOD',paper:'PAPER',skip:'SKIP'}[p] || p.toUpperCase(); }
+  function calPriorityColor(p) {
+    return {top:'var(--cal-top)',good:'var(--cal-good)',paper:'var(--paper)',skip:'var(--cal-skip)'}[p] || 'var(--muted)';
+  }
+
+  function buildCalendar() {
+    const grid = document.getElementById('cal-grid');
+    const tip  = document.getElementById('cal-tooltip');
+    if (!grid || !tip) return;
+
+    grid.innerHTML = '';
+
+    for (let m = 0; m < 12; m++) {
+      const monthEl = document.createElement('div');
+      monthEl.className = 'cal-month';
+      monthEl.innerHTML = '<div class="cal-month-title">' + CAL_MONTHS[m] + ' 2026</div>';
+
+      const evs = CAL_EVENTS.filter(e => calInMonth(e, m));
+      if (evs.length === 0) {
+        monthEl.innerHTML += '<div class="cal-month-empty">No major events</div>';
+      } else {
+        evs.forEach(ev => {
+          const now  = calIsNow(ev);
+          const soon = !now && calIsSoon(ev);
+          let cls = 'cal-event ' + ev.sport;
+          if (now)  cls += ' now';
+          if (soon) cls += ' soon';
+
+          const dates = calFmtDates(ev.start, ev.end);
+          const label = calPriorityLabel(ev.priority);
+          const metaParts = [dates];
+          if (ev.surface) metaParts.push(ev.surface);
+          if (ev.format)  metaParts.push(ev.format);
+
+          const div = document.createElement('div');
+          div.className = cls;
+          div.innerHTML =
+            '<div class="cal-event-header">' +
+              '<div class="cal-event-name">' + ev.name + (now ? ' ▶' : '') + '</div>' +
+              '<span class="cal-priority ' + ev.priority + '">' + label + '</span>' +
+            '</div>' +
+            '<div class="cal-event-meta">' + metaParts.join(' · ') + '</div>';
+
+          div.addEventListener('mouseenter', function(e) {
+            const color = calSportColor(ev.sport);
+            const prColor = calPriorityColor(ev.priority);
+            let html =
+              '<div class="cal-tooltip-title" style="color:' + color + '">' + ev.name + '</div>' +
+              '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Dates</span><span class="cal-tooltip-val">' + dates + '</span></div>';
+            if (ev.tier)    html += '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Tier</span><span class="cal-tooltip-val">' + ev.tier + '</span></div>';
+            if (ev.surface) html += '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Surface</span><span class="cal-tooltip-val">' + ev.surface + '</span></div>';
+            html += '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Format</span><span class="cal-tooltip-val">' + (ev.format || '—') + '</span></div>';
+            html += '<hr class="cal-tooltip-hr">';
+            html += '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Markets</span><span class="cal-tooltip-val">' + (ev.markets || '—') + '</span></div>';
+            html += '<div class="cal-tooltip-row"><span class="cal-tooltip-label">Priority</span><span class="cal-tooltip-val" style="color:' + prColor + '">' + label + '</span></div>';
+            if (ev.note) html += '<hr class="cal-tooltip-hr"><div style="font-size:10px;color:var(--muted);line-height:1.5">' + ev.note + '</div>';
+            tip.innerHTML = html;
+            tip.classList.add('visible');
+            calPosTip(e);
+          });
+          div.addEventListener('mousemove', calPosTip);
+          div.addEventListener('mouseleave', function() { tip.classList.remove('visible'); });
+
+          monthEl.appendChild(div);
+        });
+      }
+      grid.appendChild(monthEl);
+    }
+  }
+
+  function calPosTip(e) {
+    const tip = document.getElementById('cal-tooltip');
+    if (!tip) return;
+    const x = e.clientX + 14, y = e.clientY + 14;
+    const w = tip.offsetWidth || 260, h = tip.offsetHeight || 160;
+    tip.style.left = (x + w > window.innerWidth  ? e.clientX - w - 14 : x) + 'px';
+    tip.style.top  = (y + h > window.innerHeight ? e.clientY - h - 14 : y) + 'px';
+  }
+
+  // Build on first show, not on load (saves work if never visited)
+  const _origShowPage = showPage;
+  showPage = function(id, el) {
+    _origShowPage(id, el);
+    if (id === 'calendar') buildCalendar();
+  };
+})();
 </script>
 </body>
 </html>
