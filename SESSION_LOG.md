@@ -209,6 +209,37 @@ Old formula underestimated stakes by ~2× at near-evens odds.
 
 ---
 
+## Session 2026-03-12 (Part 4) — Dashboard Audit + Bug Fixes
+
+**Outcome:** Full dashboard audit (26 issues catalogued). 8 confirmed bugs fixed, all 48 tests passing.
+
+### Audit findings (26 issues total)
+Full audit run against all JS, API wiring, labels, and calculations. See commit `1b2ce55` for full diff.
+
+### Fixed (`dashboard/betting-dashboard.html`)
+
+| # | Bug | Root cause |
+|---|-----|-----------|
+| 1 | `currentMode` declared at line 2191 (after use) | Moved to STATE section with other globals |
+| 2 | `setMode()` tried to update `mode-tag-1/2/3/4` — IDs don't exist | Removed non-existent IDs from forEach loop |
+| 3 | Sniper board market labels always showed raw fallback | Checked `COMBINED_TOTAL`/`NUMBER_OF_SETS` but API sends `total_games`/`total_sets` (lowercase). Fixed conditions. Also added `total_180s` / `total_centuries` for darts/snooker |
+| 4 | ROI showed completely wrong numbers | `staked = sum(kellyPct)` — divided P&L by percentages (2.5, 3.1) not £. Fixed to `sum(stakeGBP)` |
+| 5 | Sport ROI denominator inflated | Included PENDING bets. Fixed: filter to settled only before summing staked |
+| 6 | WEEK/MONTH/YTD period filters broken | Dates stored as `"12 Mar"` (locale). `new Date("12 Mar")` unreliable. Fixed: store ISO `"2026-03-12"` |
+| 7 | Analyser skip left stale previous result visible | Only cleared edge field. Fixed: clear all `.result-val` cells on skip |
+| 8 | 5–8% edges coloured yellow (looked like warning) | Threshold still at 0.08. Fixed to 0.05 to match updated `MIN_EDGE` |
+
+### Not fixed (documented, deferred)
+- **Dual bet system**: localStorage `JB.bets` (manual modal) vs DB ledger (pipeline) are separate — Performance tab reads localStorage only, Bet Log reads DB only. Unifying these is a larger task.
+- **Analyser hardcodes `best_of=3`**: Grand Slam surface detection not wired to best_of selector yet.
+- **Calendar tooltip** not cleared on tab switch (minor).
+- **Modal index staleness**: Bet modal uses array index — stale if signals refresh while modal open (edge case).
+
+### Commit
+- `1b2ce55` — fix(dashboard): 8 bugs from audit
+
+---
+
 ## Next Session Priorities
 
 ### P1 — First real paper test run
