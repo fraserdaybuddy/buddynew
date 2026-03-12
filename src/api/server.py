@@ -190,7 +190,7 @@ def signals():
         from src.model.edge import screen_from_db, screen_from_betfair_markets
         raw = screen_from_db(match_date, bankroll, mode, sport=sport)
         # Fall back to live Betfair event screener when no DB matches for date
-        if not raw and sport == "tennis":
+        if not raw:
             raw = screen_from_betfair_markets(
                 sport=sport,
                 bankroll=bankroll, mode=mode, min_liquidity=50.0,
@@ -335,6 +335,61 @@ def ledger():
             "roi":          round(roi, 4),
         }
     })
+
+
+# ── POST /api/ledger — place a manual paper bet ──────────────────────────────
+
+@app.route("/api/ledger", methods=["POST"])
+def place_bet():
+    """
+    Log a manually placed paper bet.
+
+    Body JSON:
+      match    (str)   — display name e.g. "Price v Littler"
+      sport    (str)   — tennis | darts | snooker
+      market   (str)   — e.g. "total_180s"
+      direction (str)  — OVER | UNDER
+      line     (float) — e.g. 8.5
+      odds     (float) — decimal odds
+      stake    (float) — stake in GBP
+      edge     (float) — edge as fraction e.g. 0.12
+      kelly_frac (float) — kelly fraction
+      mode     (str)   — PAPER | LIVE  (default PAPER)
+    """
+    import hashlib, time as _time
+    body = request.get_json(force=True) or {}
+
+    match     = body.get("match", "")
+    sport     = body.get("sport", "tennis")
+    market    = body.get("market", "")
+    direction = (body.get("direction") or "").upper()
+    line      = body.get("line", 0)
+    odds      = body.get("odds", 0)
+    stake     = body.get("stake", 0)
+    edge      = body.get("edge", 0)
+    kelly_frac = body.get("kelly_frac", 0)
+    mode      = (body.get("mode") or "PAPER").upper()
+
+    if not match or not direction or not odds or not stake:
+        return jsonify({"error": "match, direction, odds, stake required"}), 400
+
+    bet_id = hashlib.sha256(f"manual_{match}_{market}_{direction}_{_time.time()}".encode()).hexdigest()[:16]
+    bet_dir = f"{market} {direction} {line}"
+
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO ledger
+             (bet_id, match_id, sport, bet_direction, line, odds_taken,
+              stake_gbp, status, mode, placed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, datetime('now'))""",
+        (bet_id, match, sport, bet_dir, line, odds, stake, mode)
+    )
+    conn.commit()
+    rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.close()
+
+    log.info(f"[manual bet] rowid={rowid} {match} {bet_dir} @ {odds}  £{stake}")
+    return jsonify({"rowid": rowid, "bet_id": bet_id, "status": "PENDING"})
 
 
 # ── /api/ledger/settle ────────────────────────────────────────────────────────

@@ -1493,7 +1493,7 @@
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     document.getElementById('page-' + id).classList.add('active');
     el.classList.add('active');
-    if (id === 'bets') { renderBetLog(); loadLedger(); }
+    if (id === 'bets') { loadLedger(); }
     if (id === 'performance') renderPerformance(currentPeriod);
   }
 
@@ -1603,22 +1603,30 @@
     _modalIdx = null;
   }
 
-  function confirmBet() {
+  async function confirmBet() {
     const e = EDGES[_modalIdx];
     if (!e) return;
     const kPct = kellyFracFor(e);
     const gbp = kellyGBPFor(e) || 0;
-    JB.bets.unshift({
-      id: Date.now(),
-      date: new Date().toISOString().slice(0, 10),
-      sport: e.sport, match: e.match, market: e.market, direction: e.direction,
-      edge: e.edge, odds: e.odds, kellyPct: +(kPct*100).toFixed(1),
-      stakeGBP: gbp, mode: 'PAPER', result: 'PENDING', pnlUnits: null,
-    });
-    localStorage.setItem('jb_bets', JSON.stringify(JB.bets));
     closeBetModal();
-    updateBankBar();
-    showToast('Paper bet logged: ' + e.match);
+    try {
+      const r = await fetch(`${API_BASE}/api/ledger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          match: e.match, sport: e.sport, market: e.market,
+          direction: e.direction, line: e.bookLine,
+          odds: e.odds, stake: gbp, edge: e.edge / 100,
+          kelly_frac: kPct, mode: 'PAPER',
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed');
+      showToast('Paper bet logged: ' + e.match, 'success');
+      loadLedger();
+    } catch(err) {
+      showToast('Failed to log bet: ' + err.message, 'error');
+    }
   }
 
   function showToast(msg, type) {
@@ -1774,9 +1782,11 @@
         signals: [...(dTennis.signals||[]), ...(dDarts.signals||[]), ...(dSnooker.signals||[])],
         bets:    (dTennis.bets||0) + (dDarts.bets||0) + (dSnooker.bets||0),
         total:   (dTennis.total||0) + (dDarts.total||0) + (dSnooker.total||0),
-        error:   dTennis.error || dDarts.error || dSnooker.error,
       };
-      if (d.error) throw new Error(d.error);
+      // Only throw if ALL sports failed (individual sport errors are non-fatal)
+      if (!d.signals.length && (dTennis.error && dDarts.error && dSnooker.error)) {
+        throw new Error(dTennis.error || dDarts.error || dSnooker.error);
+      }
 
       // Deduplicate: best edge per event+market
       const seen = new Map();

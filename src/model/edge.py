@@ -546,6 +546,8 @@ def screen_from_db(
 
     if sport == "tennis":
         signals = _screen_tennis_from_db(conn, match_date, bankroll, mode)
+    else:
+        signals = []
 
     conn.close()
     return signals

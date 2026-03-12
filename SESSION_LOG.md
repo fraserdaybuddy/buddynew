@@ -240,14 +240,45 @@ Full audit run against all JS, API wiring, labels, and calculations. See commit 
 
 ---
 
+---
+
+## Session 2026-03-12 (Part 5) — Multi-Sport Pipeline + Manual-Only Bet Log
+
+**Outcome:** All 3 sports scraping/screening end-to-end. Bet log now manual-only, persisted in SQLite.
+
+### Built / Fixed
+
+- **`run_daily.py`** — now scrapes and screens all 3 sports (tennis → darts → snooker):
+  - Step 2: `poll_sport()` called for each sport; per-sport failure doesn't abort others
+  - Step 3: `screen_from_db()` + `screen_from_betfair_markets()` called per sport
+  - Auto-write to ledger **removed** — bets must be placed manually via dashboard
+- **`src/model/edge.py`** — fixed `UnboundLocalError` in `screen_from_db()`: darts/snooker now return `[]` instead of crashing on unbound `signals`
+- **`src/api/server.py`**:
+  - `/api/signals` fallback: removed `sport == "tennis"` guard — all sports now fall back to live Betfair screener
+  - Added `POST /api/ledger` endpoint — accepts manual bet (match, sport, market, direction, line, odds, stake, edge, kelly_frac, mode) → writes to SQLite with PENDING status
+- **`dashboard/betting-dashboard.html`**:
+  - `loadSniperBoard()` error handling: individual sport errors no longer kill the whole board; throws only if ALL three sports fail
+  - `confirmBet()` rewritten: POSTs to `POST /api/ledger` instead of writing to localStorage
+  - Bet Log tab: removed `renderBetLog()` call — only `loadLedger()` (SQLite) runs, single source of truth
+
+### Bet Persistence Architecture (new)
+```
+PAPER button click → POST /api/ledger → SQLite ledger table → persists on disk
+Dashboard Bet Log tab → GET /api/ledger → reads SQLite → WIN/LOSS/VOID buttons → POST /api/ledger/settle
+localStorage JB.bets → no longer used for bets (bank setting still stored there)
+```
+
+### Live signals tonight (2026-03-12)
+- 21 tennis signals (Le Tien v Sinner UNDER 18.5 @ 2.38, edge +27.1%, £196 — top pick)
+- 2 darts signals: Price v Littler OVER 8.5 @ 2.78 (+57.3%, £158) | Humphries v Van Veen OVER 7.5 @ 3.10 (+51.6%, £34)
+
+---
+
 ## Next Session Priorities
 
-### P1 — First real paper test run
-```
-double-click START_JOB006.bat
-```
-Fresh scrape → signals → PENDING bets in ledger. Settle via Bet Log WIN/LOSS buttons.
-Watch for name-matching issues (Betfair abbreviated names vs Sackmann format).
+### P1 — Paper test run in progress
+Dashboard is live. Click PAPER on signals → settled via Bet Log WIN/LOSS buttons.
+Ledger cleared: clean slate, 0 bets.
 
 ### P2 — Load 2025 Sackmann data
 DB is 15 months stale. `screen_from_db()` returns 0 signals without 2026 data.

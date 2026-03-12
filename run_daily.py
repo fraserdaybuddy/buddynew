@@ -20,8 +20,6 @@ Usage:
 import argparse
 import logging
 import sys
-import hashlib
-import time
 from datetime import date as date_type, timedelta
 from pathlib import Path
 
@@ -71,14 +69,21 @@ def run(
             session = BetfairSession()
             session.login()
             try:
-                n = poll_sport(
-                    session,
-                    sport="tennis",
-                    days_ahead=2,
-                    dry_run=dry_run,
-                    link_date=match_date,
-                )
-                log.info(f"Scrape complete — {n} line rows {'(dry-run)' if dry_run else 'written'}")
+                total_rows = 0
+                for sport in ("tennis", "darts", "snooker"):
+                    try:
+                        n = poll_sport(
+                            session,
+                            sport=sport,
+                            days_ahead=2,
+                            dry_run=dry_run,
+                            link_date=match_date,
+                        )
+                        log.info(f"  {sport}: {n} line rows {'(dry-run)' if dry_run else 'written'}")
+                        total_rows += n
+                    except Exception as sport_err:
+                        log.warning(f"  {sport}: scrape failed — {sport_err}")
+                log.info(f"Scrape complete — {total_rows} total rows")
             finally:
                 session.logout()
         except Exception as e:
@@ -90,13 +95,19 @@ def run(
 
     from src.model.edge import screen_from_db, screen_from_betfair_markets, write_to_ledger
 
-    signals = screen_from_db(match_date, bankroll, mode, sport="tennis")
-    if not signals:
-        log.info("[edge] No DB matches for today — using live Betfair event screener")
-        signals = screen_from_betfair_markets(
-            sport="tennis", surface="Hard", best_of=3,
-            bankroll=bankroll, mode=mode, min_liquidity=50.0,
-        )
+    signals = []
+    for sport in ("tennis", "darts", "snooker"):
+        db_signals = screen_from_db(match_date, bankroll, mode, sport=sport)
+        if db_signals:
+            log.info(f"  [{sport}] {len(db_signals)} DB signal(s)")
+            signals.extend(db_signals)
+        else:
+            live_signals = screen_from_betfair_markets(
+                sport=sport, bankroll=bankroll, mode=mode, min_liquidity=50.0,
+            )
+            if live_signals:
+                log.info(f"  [{sport}] {len(live_signals)} live signal(s) from Betfair screener")
+            signals.extend(live_signals)
 
     bets    = [s for s in signals if s.stake_gbp > 0]
     watches = [s for s in signals if s.stake_gbp == 0 and not s.reject_reason]
@@ -122,17 +133,11 @@ def run(
             match = getattr(s, "event_name", "") or s.match_id
             log.info(f"  [{s.market_type:<15} {s.direction:<6}]  {match}  edge={s.edge:+.1%}")
 
-    # Write bets to ledger
-    if bets and not dry_run:
-        conn = get_conn()
-        run_id = hashlib.sha256(f"daily_{match_date}_{time.time()}".encode()).hexdigest()[:12]
-        n_written = write_to_ledger(bets, run_id, conn)
-        conn.close()
-        log.info(f"\nLedger: {n_written} bets written  run_id={run_id}")
-    elif dry_run:
-        log.info("\nDRY-RUN: ledger write skipped")
+    # Bets are NOT auto-written to ledger — place them manually via the dashboard
+    if dry_run:
+        log.info("\nDRY-RUN: no ledger writes")
     else:
-        log.info("\nNo qualifying bets — nothing written to ledger")
+        log.info(f"\n{len(bets)} qualifying bet(s) — open dashboard and click PAPER to log each one")
 
     # ── Step 4: Pending settlement check ──────────────────────────────────────
     _separator("STEP 4: Pending bets — need manual settlement")
