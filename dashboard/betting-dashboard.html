@@ -1477,6 +1477,7 @@
   let EDGES = [];
   let TODAY  = { tennis: [], darts: [], snooker: [] };
   let currentPeriod = 'all';
+  let currentMode   = 'paper';
 
   // ── KELLY MATH — mirrors Python backend exactly ────────────────────────
   // stake = bankroll × (edge/b) × 0.25 × tier_mult × elo_confidence
@@ -1656,7 +1657,7 @@
     const gbp = kellyGBPFor(e) || 0;
     JB.bets.unshift({
       id: Date.now(),
-      date: new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'short'}),
+      date: new Date().toISOString().slice(0, 10),
       sport: e.sport, match: e.match, market: e.market, direction: e.direction,
       edge: e.edge, odds: e.odds, kellyPct: +(kPct*100).toFixed(1),
       stakeGBP: gbp, mode: 'PAPER', result: 'PENDING', pnlUnits: null,
@@ -1748,9 +1749,12 @@
     const direction = (document.getElementById('direction')?.value || 'UNDER').toUpperCase();
 
     if (odds < JB.MIN_ODDS) {
-      document.getElementById('result-edge').textContent = 'SKIP';
-      document.getElementById('result-edge').style.color = 'var(--warn)';
-      document.querySelector('.rec-text').innerHTML = '<strong style="color:var(--warn)">ODDS TOO SKINNY</strong><br>Odds ' + odds.toFixed(2) + ' below 1.60 minimum. No bet.';
+      const edgeEl2 = document.getElementById('result-edge');
+      if (edgeEl2) { edgeEl2.textContent = 'SKIP'; edgeEl2.style.color = 'var(--warn)'; }
+      const panel2 = document.getElementById('result-panel');
+      if (panel2) panel2.querySelectorAll('.result-val').forEach(el => el.textContent = '—');
+      const recEl2 = document.querySelector('.rec-text');
+      if (recEl2) recEl2.innerHTML = '<strong style="color:var(--warn)">ODDS TOO SKINNY</strong><br>Odds ' + odds.toFixed(2) + ' below 1.60 minimum. No bet.';
       return;
     }
     const edgeEl = document.getElementById('result-edge');
@@ -1769,7 +1773,7 @@
       const edge = d.edge;
       const edgePct = (edge > 0 ? '+' : '') + (edge * 100).toFixed(1) + '%';
       edgeEl.textContent = edgePct;
-      edgeEl.style.color = edge >= 0.08 ? 'var(--accent)' : edge > 0 ? 'var(--yellow)' : 'var(--red)';
+      edgeEl.style.color = edge >= 0.05 ? 'var(--accent)' : edge > 0 ? 'var(--yellow)' : 'var(--red)';
       const kFrac = d.kelly_frac || 0;
       const kellyValEl = document.querySelector('.kelly-val');
       if (kellyValEl) kellyValEl.textContent = (kFrac * 100).toFixed(1) + '%';
@@ -1823,10 +1827,15 @@
       EDGES.length = 0;
       qualifying.forEach(s => {
         const match = s.event_name || s.match_id.replace(/^BF:/, '').replace(/_/g, ' ');
-        const mkt = s.market_type === 'COMBINED_TOTAL'
+        const _mt = (s.market_type || '').toLowerCase();
+        const mkt = _mt === 'total_games'
           ? `Total Games ${s.direction === 'OVER' ? 'O' : 'U'}/${s.line}`
-          : s.market_type === 'NUMBER_OF_SETS'
+          : (_mt === 'total_sets' || _mt === 'number_of_sets')
           ? (s.direction === 'OVER' ? 'No. of Sets — Three' : 'No. of Sets — Two')
+          : _mt === 'total_180s'
+          ? `180s ${s.direction === 'OVER' ? 'O' : 'U'}/${s.line}`
+          : _mt === 'total_centuries' || _mt === 'total_frames'
+          ? `Centuries ${s.direction === 'OVER' ? 'O' : 'U'}/${s.line}`
           : `${s.market_type} ${s.line}`;
         EDGES.push({ match, market: mkt, sport: s.sport, direction: s.direction,
           modelLine: s.fair_line || 0, bookLine: s.line,
@@ -1915,8 +1924,7 @@ function setMode(mode) {
   // Update mode tags across pages
   const modeTagClass = mode === 'paper' ? 'status-pill pill-paper' : 'status-pill pill-green';
   const modeTagText  = mode === 'paper' ? 'PAPER' : 'LIVE';
-  ['mode-tag-1','mode-tag-2','mode-tag-3','mode-tag-4',
-   'perf-mode-tag','betlog-mode-tag'].forEach(id => {
+  ['perf-mode-tag','betlog-mode-tag'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.className = modeTagClass; el.textContent = modeTagText; }
   });
@@ -1938,22 +1946,22 @@ function setPeriod(period, btn) {
 function renderPerformance(period) {
   const titles = { day:"Today's Bets", week:"This Week's Bets", month:"This Month's Bets", ytd:"Year to Date", all:"All Time" };
   const now = new Date();
-  const todayStr = now.toLocaleDateString('en-GB', { day:'2-digit', month:'short' });
-  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());
+  const todayStr = now.toISOString().slice(0, 10);
+  const startOfWeek  = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());  startOfWeek.setHours(0,0,0,0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfYear  = new Date(now.getFullYear(), 0, 1);
 
   let bets = JB.bets;
   if (period === 'day')   bets = JB.bets.filter(b => b.date === todayStr);
-  else if (period === 'week')  bets = JB.bets.filter(b => { const d = new Date(b.date); return d >= startOfWeek; });
-  else if (period === 'month') bets = JB.bets.filter(b => { const d = new Date(b.date); return d >= startOfMonth; });
-  else if (period === 'ytd')   bets = JB.bets.filter(b => { const d = new Date(b.date); return d >= startOfYear; });
+  else if (period === 'week')  bets = JB.bets.filter(b => new Date(b.date) >= startOfWeek);
+  else if (period === 'month') bets = JB.bets.filter(b => new Date(b.date) >= startOfMonth);
+  else if (period === 'ytd')   bets = JB.bets.filter(b => new Date(b.date) >= startOfYear);
 
   const settled = bets.filter(b => b.result !== 'PENDING');
   const wins    = settled.filter(b => b.result === 'WIN').length;
   const losses  = settled.filter(b => b.result === 'LOSS').length;
   const pnl     = settled.reduce((s, b) => s + (b.pnlUnits || 0), 0);
-  const staked  = bets.reduce((s, b) => s + (b.kellyPct || 0), 0);
+  const staked  = bets.reduce((s, b) => s + (b.stakeGBP || 0), 0);
   const roi     = staked > 0 ? (pnl / staked * 100) : 0;
   const winRate = settled.length ? Math.round(wins / settled.length * 100) : 0;
   const bank    = JB.bank || 0;
@@ -2029,7 +2037,7 @@ function renderPerformance(period) {
     const roiData = ['tennis','darts','snooker'].map(sp => {
       const spB = JB.bets.filter(b => b.sport === sp);
       const spP = spB.reduce((s, b) => s + (b.pnlUnits || 0), 0);
-      const spS = spB.reduce((s, b) => s + (b.kellyPct || 0), 0);
+      const spS = spB.filter(b => b.result !== 'PENDING').reduce((s, b) => s + (b.stakeGBP || 0), 0);
       return { sport: sp.charAt(0).toUpperCase() + sp.slice(1), roi: spS > 0 ? spP/spS*100 : 0, bets: spB.length };
     });
     const maxROI = Math.max(...roiData.map(s => Math.abs(s.roi)), 1);
@@ -2187,8 +2195,6 @@ function filterBetLog(sport, btn) {
   const titles = { all: 'All Bets', tennis: 'Tennis — Aces', darts: 'Darts — 180s', snooker: 'Snooker — Centuries' };
   document.getElementById('betlog-title').textContent = titles[sport] || 'All Bets';
 }
-
-  let currentMode = 'paper';
 
 // ── INIT ──
 renderPerformance('day');
@@ -2374,18 +2380,23 @@ async function loadLedger() {
         ? matchId.slice(3).replace(/_/g, ' ')
         : (p1 && p2 ? `${p1} / ${p2}` : matchId);
 
-      // Format bet_direction: "COMBINED_TOTAL_OVER" → "Total Games O/19.5"
-      // "NUMBER_OF_SETS_OVER" → "No. of Sets — Three"
+      // Format bet_direction: "total_games_OVER" → "Total Games O/19.5"
+      // "total_sets_OVER" → "No. of Sets — Three"
+      // "total_180s_OVER" → "180s O/4.5"
       const dirRaw = row.bet_direction || '';
-      const dirMatch = dirRaw.match(/^(total_games|total_sets|number_of_sets)_(OVER|UNDER)$/i);
+      const dirMatch = dirRaw.match(/^(total_games|total_sets|number_of_sets|total_180s|total_centuries|total_frames)_(OVER|UNDER)$/i);
       let betLabel;
       if (dirMatch) {
         const mkt = dirMatch[1].toLowerCase();
         const dir = dirMatch[2].toUpperCase();
         if (mkt === 'total_games') {
           betLabel = `Total Games ${dir === 'OVER' ? 'O' : 'U'}/${row.line}`;
-        } else {
+        } else if (mkt === 'total_sets' || mkt === 'number_of_sets') {
           betLabel = dir === 'OVER' ? 'No. of Sets — Three' : 'No. of Sets — Two';
+        } else if (mkt === 'total_180s') {
+          betLabel = `180s ${dir === 'OVER' ? 'O' : 'U'}/${row.line}`;
+        } else {
+          betLabel = `Centuries ${dir === 'OVER' ? 'O' : 'U'}/${row.line}`;
         }
       } else {
         betLabel = dirRaw || `${row.line}`;
