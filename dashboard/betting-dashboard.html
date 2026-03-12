@@ -998,23 +998,6 @@
         </div>
       </div>
 
-      <!-- TODAY'S MATCHES -->
-      <div class="section-title">Today's Matches</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:8px">Tennis — ATP</div>
-          <div id="today-tennis" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--warn);margin-bottom:8px">Darts — PDC</div>
-          <div id="today-darts" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-        <div>
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--yellow);margin-bottom:8px">Snooker — WST</div>
-          <div id="today-snooker" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-      </div>
-
       <!-- DB STATS -->
       <div class="grid-4">
         <div class="card card-accent">
@@ -1531,36 +1514,6 @@
     document.getElementById('market-label').textContent = labels[sport];
   }
 
-  // ── TODAY'S MATCHES — built from live /api/signals response ───────────
-  function renderTodayFromSignals(signals) {
-    const byMatch = new Map();
-    (signals || []).forEach(s => {
-      const key = s.event_name || s.match_id;
-      if (!byMatch.has(key)) {
-        byMatch.set(key, { name: key, sport: s.sport, hasEdge: !s.reject_reason });
-      } else if (!s.reject_reason) {
-        byMatch.get(key).hasEdge = true;
-      }
-    });
-    ['tennis','darts','snooker'].forEach(sport => {
-      const el = document.getElementById('today-' + sport);
-      if (!el) return;
-      const matches = [...byMatch.values()].filter(m => m.sport === sport);
-      if (!matches.length) {
-        el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:4px">No matches</div>';
-        return;
-      }
-      el.innerHTML = matches.map(m => {
-        const parts = m.name.split(' v ');
-        const p1 = parts[0] || m.name, p2 = parts[1] || '';
-        return `<div class="today-match-card ${m.hasEdge ? 'has-edge' : ''}">
-          <div class="today-match-sport"><span>${sport.toUpperCase()}</span>${m.hasEdge ? '<span class="today-edge-badge">▲ EDGE</span>' : ''}</div>
-          <div class="today-match-players">${p1}${p2 ? ' vs ' + p2 : ''}</div>
-        </div>`;
-      }).join('');
-    });
-  }
-
   // ── SNIPER KELLY/GBP CELLS ─────────────────────────────────────────────
   function updateSniperKelly() {
     EDGES.forEach((e, i) => {
@@ -1884,8 +1837,6 @@
           </tr>`;
         }).join('');
       }
-
-      renderTodayFromSignals(d.signals);
 
       const totalEl = document.getElementById('stat-total-val');
       const subEl   = document.getElementById('stat-total-sub');
