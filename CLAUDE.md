@@ -13,78 +13,144 @@ Core thesis: books price WHO WINS, they underprice WHAT HAPPENS DURING THE MATCH
 |-------|------|------|
 | Darts (PDC) | 180s | Mismatch → fewer 180s / Parity → more |
 | Snooker (WST) | Centuries | Same structure |
-| Tennis (ATP/WTA) | Aces | Big server vs passive returner |
+| Tennis (ATP/WTA) | Total games O/U | Big server vs passive returner → mismatch → shorter match |
 
-## Current Status (2026-03-09)
-- **Stage 1 COMPLETE** — all infrastructure built
-- **Tennis:** 5,632 ATP matches in DB ✓
-- **Darts:** Scraper built and RUNNING NOW (darts24.com, 16 major tournaments 2024+2025)
-- **Snooker:** Scraper built, NOT yet run — needs data source verification first
-- **Next after darts data:** Stage 2 — Sportmarket adapter (execution layer)
+## Current Status (2026-03-12)
+- **Stage 2 ACTIVE** — paper testing phase started
+- **Tennis:** 5,632 ATP matches in DB (last date: 2024-12-18 — stale, live screener bypasses this)
+- **Darts:** 1,230 matches in DB
+- **Snooker:** 2,185 matches in DB
+- **Betfair:** Live markets scraped — 1,118+ rows (Indian Wells 2026)
+- **Dashboard:** Live at `http://127.0.0.1:5000` — all hardcoded data removed
+- **Paper testing:** ACTIVE — bets logged to SQLite ledger, settled via dashboard WIN/LOSS buttons
+
+## Daily Startup
+```
+double-click START_JOB006.bat
+```
+That runs: backup → scrape → screen → ledger → start server → open browser.
+
+Or manually in PowerShell:
+```powershell
+cd C:\Users\frase\Downloads\Claude\JOB006_complete_v2\sports-betting
+$env:PYTHONUTF8=1; python run_daily.py   # daily pipeline
+$env:PYTHONUTF8=1; python run_server.py  # then open http://127.0.0.1:5000
+```
 
 ## Key Files
 ```
-CLAUDE.md                          ← you are here
-JOB006_MASTER_BLUEPRINT.md         ← full spec, model logic, build status
-JOB006_FILE_MAP.md                 ← file index and data architecture
+START_JOB006.bat                   ← one-click daily launcher
+run_daily.py                       ← daily orchestrator: backup→scrape→screen→ledger→summary
+run_presession.py                  ← manual pre-session pipeline (use run_daily.py instead)
+run_server.py                      ← Flask API server (port 5000)
+test_all.py                        ← full system test suite
+SESSION_LOG.md                     ← build history / changelog
+
 src/
-  database.py                      ← SQLite schema + helpers
+  database.py                      ← SQLite schema + helpers (get_conn, backup, init_db)
   resolver.py                      ← player identity resolution
   config.py                        ← sport config registry
+
+  api/
+    server.py                      ← Flask API (6 endpoints incl. /api/ledger/settle)
+
+  model/
+    edge.py                        ← edge screeners + Kelly staking + write_to_ledger
+    simulate.py                    ← Monte Carlo match simulation (BO3/BO5)
+    elo_loader.py                  ← surface-split ELO ratings
+    elo_warmup.py                  ← warm-up ELO from Sackmann CSV history
+    form_builder.py                ← rolling player form metrics
+
+  execution/
+    betfair.py                     ← Betfair API client (cert login, list_markets, book)
+    scraper.py                     ← poll COMBINED_TOTAL + NUMBER_OF_SETS → betfair_markets
+    governor.py                    ← Kelly fraction + stake limits
+    ledger_writer.py               ← ledger write helpers
+
   scrapers/
-    darts/
-      darts24.py                   ← PRIMARY darts scraper (darts24.com) ✓
-      dartsdatabase.py             ← DEPRECATED — ignore
-    snooker/
-      cuetrackeR.py                ← snooker scraper — NOT yet verified/run
-    tennis/
-      sackmann.py                  ← tennis scraper — COMPLETE ✓
+    tennis/sackmann.py             ← Sackmann ATP/WTA CSV loader ✓
+    darts/darts24.py               ← darts24.com scraper ✓
+    snooker/cuetrackeR.py          ← cuetracker.net scraper — NOT YET RUN
+
 data/
   universe.db                      ← SQLite DB (not in git — binary)
+  backups/                         ← daily DB backups (auto-created by run_daily.py)
+
+dashboard/
+  betting-dashboard.html           ← live dashboard — 6 tabs, all live data
 ```
+
+## API Endpoints (all at http://127.0.0.1:5000)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Serves betting-dashboard.html |
+| GET | `/api/status` | DB health, match counts, pipeline state |
+| GET | `/api/latest-date` | Most recent betfair_markets date |
+| GET | `/api/signals` | Edge screener — returns BetSignal list |
+| GET | `/api/markets` | betfair_markets rows |
+| GET | `/api/ledger` | Bet history + P&L summary |
+| POST | `/api/ledger/settle` | Mark bet WON/LOST/VOID, compute P&L |
+| POST | `/api/analyse` | ELO lookup + Monte Carlo for named players |
 
 ## Data Sources Confirmed
-| Sport | Source | Stats per match |
-|-------|--------|-----------------|
-| Darts | darts24.com | 180s, 3-dart avg, 140+, 100+, checkout %, highest checkout |
-| Tennis | github.com/JeffSackmann/tennis_atp | Full ATP/WTA CSV — aces, df, svpt, etc. |
-| Snooker | cuetracker.net (UNVERIFIED) | Centuries — needs checking before running |
+| Sport | Source | Stats |
+|-------|--------|-------|
+| Tennis | github.com/JeffSackmann/tennis_atp | Aces, df, svpt — full ATP/WTA CSV |
+| Darts | darts24.com | 180s, avg, 140+, checkout % |
+| Snooker | cuetracker.net (UNVERIFIED) | Centuries — not yet scraped |
+| Betfair | Exchange API (cert auth) | Live O/U lines, liquidity |
 
-**dartsdatabase.co.uk — REJECTED.** No per-match 180s. Only scores + averages.
+## Staking Model
+Fractional Kelly with 3 confidence multipliers:
 
-## darts24.com URL Pattern
 ```
-Results page:  https://www.darts24.com/{region}/{tournament}/{year}/results/
-Stats page:    https://www.darts24.com/match/{p1-slug}/{p2-slug}/summary/stats/?mid={id}
-```
+stake = bankroll × raw_kelly × KELLY_FRACTION × tier_mult × elo_confidence
 
-## Darts Tournaments in Scope (2024 + 2025)
-- PDC World Championship
-- PDC Premier League
-- PDC UK Open
-- PDC World Matchplay
-- PDC World Grand Prix
-- PDC European Championship
-- PDC Grand Slam of Darts
-- PDC Players Championship Finals
+KELLY_FRACTION = 0.25   (quarter-Kelly base)
+
+tier_mult:
+  T1 (≥10 surface matches): 1.00
+  T2 (3–9 matches):          0.70
+  T3 (0–2 matches):          0.40
+
+elo_confidence:
+  gap < 50 pts:  0.0  (model has no edge — block bet)
+  gap 50–350:    linear 0→1
+  gap ≥ 350:     1.0
+
+Limits (governor.py):
+  MIN_STAKE = £5
+  MAX_STAKE = £500
+  MIN_EDGE  = 8%
+```
 
 ## Database Tables
-- `staging_darts` — raw scraped darts rows (PENDING → RESOLVED)
-- `staging_tennis` — raw scraped tennis rows
-- `matches` — promoted/validated match data
-- `players` / `player_aliases` — identity resolution
-- `tournaments` — tournament metadata
-- `player_form` — computed form metrics (not yet populated)
-- `betfair_markets` — market data (not yet populated)
+| Table | Purpose |
+|-------|---------|
+| `players` | Canonical player registry |
+| `player_aliases` | raw_name → player_id mapping |
+| `tournaments` | Tournament metadata |
+| `matches` | Core match results (append-only) |
+| `player_form` | Rolling form metrics per player |
+| `elo_ratings` | Surface-split ELO per player |
+| `betfair_markets` | Live Betfair O/U lines |
+| `ledger` | All paper/live bets with full lifecycle |
+
+## Betfair API — Confirmed Working
+- Login: cert-based at `https://identitysso-cert.betfair.com/api/certlogin`
+- Certs: `C:\Users\frase\client.crt` + `C:\Users\frase\client.pem`
+- App key (delayed): `orGvcfyb0YqLUqaR`  App key (live): `8P5aQxQ6iXp1jEAe`
+- Market types used: `COMBINED_TOTAL` (total games), `NUMBER_OF_SETS`
+- `listMarketBook`: max 5 markets per call, EX_BEST_OFFERS only, no orderProjection
 
 ## Git Operations
 **Use Claude Code (terminal), NOT browser Claude.**
-Browser Claude has no terminal access and cannot push to git.
 All git work must go through the Claude Code CLI session.
 
-## Rules (from blueprint — never violate)
+## Rules (never violate)
 1. Never fabricate data. If a source is unavailable, report BLOCKED.
 2. Never mark a task complete if the output file doesn't exist on disk.
 3. Never skip a validation step.
 4. Never proceed past a HARD GATE without human confirmation.
 5. NULL policy: missing stats → NULL, never 0, never estimated.
+6. Paper mode always before live mode — LIVE gate requires 30 days paper P&L ≥ 0.

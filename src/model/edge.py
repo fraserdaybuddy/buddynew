@@ -75,6 +75,8 @@ class BetSignal:
     synthetic_line: bool         # True if market line was synthesised (no real Betfair data)
     filters_passed: list = field(default_factory=list)
     reject_reason:  Optional[str] = None
+    fair_line:      float = 0.0  # model's fair line (e.g. 21.8 games)
+    event_name:     str = ""     # human-readable "P1 v P2" from Betfair event
 
 
 # ── Kelly calculation ──────────────────────────────────────────────────────────
@@ -709,9 +711,10 @@ def screen_from_betfair_markets(
                     if edge_val >= MIN_EDGE else (0.0, 0.0)
 
                 # ELO gap filter
+                from datetime import date as _date
                 ok, reject_reason, filters = check_filters(
                     abs_gap, tier, tier,
-                    None, None, "2026-03-11",
+                    None, None, str(_date.today()),
                     p1_n or 0, p2_n or 0,
                     matched if matched > 0 else None,
                     False,
@@ -734,6 +737,8 @@ def screen_from_betfair_markets(
                     synthetic_line=False,
                     filters_passed=filters,
                     reject_reason=None if ok else reject_reason,
+                    fair_line=round(fair, 1),
+                    event_name=event_name,
                 ))
 
     conn.close()
@@ -744,21 +749,28 @@ def screen_from_betfair_markets(
 
 def write_to_ledger(signals: list, run_id: str, conn: sqlite3.Connection) -> int:
     """Write BetSignals to ledger table. Returns number of bets written."""
+    import hashlib as _hashlib
     written = 0
+    # Disable FK enforcement so synthetic BF: match_ids (live screener) can be stored
+    conn.execute("PRAGMA foreign_keys = OFF")
     for s in signals:
         if s.stake_gbp <= 0:
             continue
+        bet_direction = f"{s.market_type}_{s.direction}"
+        bet_id = _hashlib.sha256(
+            f"{s.match_id}|{bet_direction}|{run_id}".encode()
+        ).hexdigest()[:16]
         conn.execute(
             """INSERT OR IGNORE INTO ledger
-               (run_id, match_id, sport, bet_direction, line, odds_taken,
+               (bet_id, run_id, match_id, sport, bet_direction, line, odds_taken,
                 stake_gbp, status, mode, placed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))""",
-            (run_id, s.match_id, s.sport,
-             f"{s.market_type}_{s.direction}", s.line,
-             s.odds, s.stake_gbp, "PENDING", s.mode)
+               VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+            (bet_id, run_id, s.match_id, s.sport,
+             bet_direction, s.line, s.odds, s.stake_gbp, "PENDING", s.mode)
         )
         written += 1
     conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
     return written
 
 

@@ -24,12 +24,14 @@ import logging
 from pathlib import Path
 from datetime import date as date_type, datetime
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 log = logging.getLogger("api")
 app = Flask(__name__)
+CORS(app)
 
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "universe.db"
 
@@ -46,13 +48,23 @@ def rows_to_list(rows) -> list:
     return [dict(r) for r in rows]
 
 
+DASHBOARD = Path(__file__).parent.parent.parent / "dashboard" / "betting-dashboard.html"
+
+
+# ── Dashboard ──────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return send_file(DASHBOARD)
+
+
 # ── CORS (needed for file:// origin) ──────────────────────────────────────────
 
 @app.after_request
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"]  = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
     return response
 
 
@@ -100,8 +112,9 @@ def status():
     blockers = []
     if bm_total == 0:
         blockers.append("betfair_markets_empty — run run_presession.py first")
-    if last_tennis and last_tennis < "2026-01-01":
-        blockers.append(f"data_stale — tennis last updated {last_tennis}")
+    # Only flag data_stale when betfair markets are also empty (live screener bypasses DB)
+    if bm_total == 0 and last_tennis and last_tennis < "2026-01-01":
+        blockers.append(f"data_stale — tennis DB last updated {last_tennis} (live screener active)")
     if led_total == 0:
         blockers.append("no_bets_yet — no recommendations generated")
 
@@ -133,14 +146,23 @@ def status():
 
 @app.route("/api/latest-date")
 def latest_date():
-    """Return the most recent date in the matches table — useful as demo fallback."""
+    """Return today's date if betfair_markets has data, else most recent match date."""
+    from datetime import date as _date
     sport = request.args.get("sport", "tennis")
     conn  = get_db()
-    row   = conn.execute(
-        "SELECT MAX(match_date) as d FROM matches WHERE sport=?", (sport,)
+    # Prefer the most recent scraped betfair date — that's what has live lines
+    bf_row = conn.execute(
+        "SELECT MAX(created_at) as d FROM betfair_markets WHERE sport=?", (sport,)
     ).fetchone()
+    if bf_row and bf_row["d"]:
+        date = bf_row["d"][:10]  # trim to YYYY-MM-DD
+    else:
+        row  = conn.execute(
+            "SELECT MAX(match_date) as d FROM matches WHERE sport=?", (sport,)
+        ).fetchone()
+        date = row["d"]
     conn.close()
-    return jsonify({"date": row["d"]})
+    return jsonify({"date": date})
 
 
 # ── /api/signals ──────────────────────────────────────────────────────────────
@@ -175,12 +197,18 @@ def signals():
         return jsonify({"error": str(e), "signals": [], "bets": 0, "total": 0})
 
     def sig_to_dict(s):
+        # Derive friendly match name: event_name if set, else strip BF: prefix
+        ev = getattr(s, "event_name", "") or ""
+        if not ev and s.match_id.startswith("BF:"):
+            ev = s.match_id[3:].replace("_", " ")
         return {
             "match_id":      s.match_id,
+            "event_name":    ev,
             "sport":         s.sport,
             "market_type":   s.market_type,
             "direction":     s.direction,
             "line":          s.line,
+            "fair_line":     getattr(s, "fair_line", 0.0),
             "model_p":       s.model_p,
             "market_p":      s.market_p,
             "edge":          s.edge,
@@ -254,25 +282,38 @@ def ledger():
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     conn = get_db()
+    # Deduplicate: keep only the most recent bet per (match_id, bet_direction)
+    dedup_conditions = list(where)  # copy the conditions list
+    dedup_conditions.append(
+        "l.placed_at = (SELECT MAX(l2.placed_at) FROM ledger l2 "
+        "WHERE l2.match_id = l.match_id AND l2.bet_direction = l.bet_direction)"
+    )
+    dedup_where_sql = "WHERE " + " AND ".join(dedup_conditions)
+
     rows = conn.execute(
-        f"""SELECT l.bet_id, l.match_id, l.sport, l.bet_direction, l.line,
+        f"""SELECT l.rowid, l.bet_id, l.match_id, l.sport, l.bet_direction, l.line,
                   l.odds_taken, l.stake_gbp, l.status, l.profit_loss_gbp,
                   l.placed_at, l.settled_at, l.mode,
                   m.match_date, m.player1_id, m.player2_id
            FROM ledger l
            LEFT JOIN matches m ON l.match_id = m.match_id
-           {where_sql}
+           {dedup_where_sql}
            ORDER BY l.placed_at DESC
            LIMIT ?""",
         params + [limit]
     ).fetchall()
 
-    # Summary
+    # Summary — count only unique bets (same dedup logic)
+    dedup_summary_conds = list(where) + [
+        "l.placed_at = (SELECT MAX(l2.placed_at) FROM ledger l2 "
+        "WHERE l2.match_id = l.match_id AND l2.bet_direction = l.bet_direction)"
+    ]
+    dedup_summary_where = "WHERE " + " AND ".join(dedup_summary_conds)
     summary_rows = conn.execute(
         f"""SELECT COUNT(*) as n,
                   SUM(CASE WHEN profit_loss_gbp IS NOT NULL THEN profit_loss_gbp ELSE 0 END) as total_pnl,
                   SUM(stake_gbp) as total_staked
-           FROM ledger l {where_sql}""",
+           FROM ledger l {dedup_summary_where}""",
         params
     ).fetchone()
     conn.close()
@@ -291,6 +332,58 @@ def ledger():
             "roi":          round(roi, 4),
         }
     })
+
+
+# ── /api/ledger/settle ────────────────────────────────────────────────────────
+
+@app.route("/api/ledger/settle", methods=["POST"])
+def settle_bet():
+    """
+    Settle a paper bet. Updates status, P&L, and settled_at timestamp.
+
+    Body JSON:
+      rowid  (int)  — ledger rowid (from /api/ledger response)
+      result (str)  — WON | LOST | VOID
+    """
+    body   = request.get_json(force=True) or {}
+    rowid  = body.get("rowid")
+    result = (body.get("result") or "").upper()
+
+    if not rowid or result not in ("WON", "LOST", "VOID"):
+        return jsonify({"error": "rowid (int) and result (WON/LOST/VOID) required"}), 400
+
+    conn = get_db()
+    row  = conn.execute(
+        "SELECT rowid, stake_gbp, odds_taken, status FROM ledger WHERE rowid=?",
+        (rowid,)
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({"error": f"Bet rowid={rowid} not found"}), 404
+
+    if row["status"] not in ("PENDING",):
+        conn.close()
+        return jsonify({"error": f"Bet already settled as {row['status']}"}), 409
+
+    if result == "WON":
+        pnl = round((row["odds_taken"] - 1.0) * row["stake_gbp"], 2)
+    elif result == "LOST":
+        pnl = round(-row["stake_gbp"], 2)
+    else:
+        pnl = 0.0
+
+    conn.execute(
+        """UPDATE ledger
+           SET status=?, profit_loss_gbp=?, settled_at=datetime('now')
+           WHERE rowid=?""",
+        (result, pnl, rowid)
+    )
+    conn.commit()
+    conn.close()
+
+    log.info(f"[settle] rowid={rowid} → {result}  pnl=£{pnl:+.2f}")
+    return jsonify({"rowid": rowid, "result": result, "pnl": pnl})
 
 
 # ── /api/analyse ──────────────────────────────────────────────────────────────
@@ -483,7 +576,7 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(message)s",
     )
-    log.info("[api] Starting JOB-006 dashboard API on http://localhost:5000")
+    log.info("[api] Starting JOB-006 dashboard API on http://127.0.0.1:5000")
     log.info("[api] Open dashboard/betting-dashboard.html in your browser")
     app.run(host="0.0.0.0", port=5000, debug=False)
 
