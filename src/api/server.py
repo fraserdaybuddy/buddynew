@@ -9,6 +9,9 @@ Endpoints:
   GET  /api/ledger?sport=&limit= Recent ledger entries + summary
   POST /api/analyse             Analyse a match by player name (name lookup → ELO → sim)
   GET  /api/latest-date         Most recent date in matches table (fallback for UI)
+  GET  /api/scrape-status        When odds were last scraped + row counts per sport
+  POST /api/scrape-now           Trigger immediate Betfair scrape (~10s)
+  POST /api/settle-auto         Auto-settle PENDING paper bets from Betfair outcomes
 
 CORS: all origins allowed — required for file:// dashboard.
 
@@ -626,15 +629,165 @@ def analyse():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Scrape state (shared with background scheduler) ───────────────────────────
+
+_scrape_state = {
+    "last_scraped_at": None,   # ISO string UTC
+    "last_sport_counts": {},   # {sport: rows}
+    "in_progress": False,
+}
+
+
+def _run_scrape() -> dict:
+    """Run a Betfair scrape for all sports. Updates _scrape_state. Returns counts dict."""
+    from datetime import datetime as _dt, timezone as _tz
+    if _scrape_state["in_progress"]:
+        return {}
+
+    _scrape_state["in_progress"] = True
+    counts = {}
+    try:
+        from src.execution.betfair import BetfairSession
+        from src.execution.scraper import poll_sport
+        session = BetfairSession()
+        session.login()
+        try:
+            for sport in ("tennis", "darts", "snooker"):
+                try:
+                    n = poll_sport(session, sport=sport, days_ahead=2)
+                    counts[sport] = n
+                    log.info("[scrape] %s: %d rows", sport, n)
+                except Exception as se:
+                    log.warning("[scrape] %s failed: %s", sport, se)
+                    counts[sport] = -1
+        finally:
+            session.logout()
+        _scrape_state["last_scraped_at"] = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _scrape_state["last_sport_counts"] = counts
+    except Exception as e:
+        log.warning("[scrape] failed: %s", e)
+    finally:
+        _scrape_state["in_progress"] = False
+    return counts
+
+
+# ── /api/scrape-status ────────────────────────────────────────────────────────
+
+@app.route("/api/scrape-status")
+def scrape_status():
+    """Return when odds were last scraped and how many rows per sport."""
+    return jsonify({
+        "last_scraped_at": _scrape_state["last_scraped_at"],
+        "sport_counts":    _scrape_state["last_sport_counts"],
+        "in_progress":     _scrape_state["in_progress"],
+    })
+
+
+# ── /api/scrape-now ───────────────────────────────────────────────────────────
+
+@app.route("/api/scrape-now", methods=["POST"])
+def scrape_now():
+    """Trigger an immediate Betfair scrape (runs synchronously, ~10s)."""
+    if _scrape_state["in_progress"]:
+        return jsonify({"error": "Scrape already in progress"}), 409
+    try:
+        counts = _run_scrape()
+        return jsonify({
+            "last_scraped_at": _scrape_state["last_scraped_at"],
+            "sport_counts":    counts,
+        })
+    except Exception as e:
+        log.exception("scrape-now failed")
+        return jsonify({"error": str(e)}), 500
+
+
+# ── /api/settle-auto ──────────────────────────────────────────────────────────
+
+@app.route("/api/settle-auto", methods=["POST"])
+def settle_auto():
+    """
+    Trigger auto-settlement of PENDING paper bets from Betfair market outcomes.
+    Calls listMarketBook for each pending bet's market; settles if CLOSED.
+
+    Body JSON (optional):
+      dry_run (bool) — preview only, no DB writes
+    """
+    body    = request.get_json(force=True) or {}
+    dry_run = bool(body.get("dry_run", False))
+
+    try:
+        from src.data.auto_settle import settle_pending_paper_bets
+        result = settle_pending_paper_bets(dry_run=dry_run)
+        return jsonify(result)
+    except Exception as e:
+        log.exception("auto-settle failed")
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Background scheduler ───────────────────────────────────────────────────────
+
+def _background_scheduler(scrape_interval_hours: float = 0.5):
+    """
+    Background thread — keeps data fresh while the server is running.
+
+    Schedule:
+      - Starts 20 seconds after server launch (let Flask initialise first)
+      - Runs a daily DB backup once per calendar day
+      - Re-scrapes Betfair markets for all 3 sports every scrape_interval_hours
+        (default 2h) so odds on the dashboard stay current
+    """
+    import time
+    from datetime import date as _date
+
+    time.sleep(20)
+    log.info("[scheduler] Background scheduler started (interval=%dh)", scrape_interval_hours)
+
+    last_backup_date = None
+
+    while True:
+        today = str(_date.today())
+
+        # ── Daily backup (once per calendar day) ──────────────────────────────
+        if last_backup_date != today:
+            try:
+                from src.database import backup
+                dest = backup(label="auto")
+                log.info("[scheduler] Daily backup: %s", dest.name)
+                last_backup_date = today
+            except Exception as e:
+                log.warning("[scheduler] Backup failed: %s", e)
+
+        # ── Betfair scrape ─────────────────────────────────────────────────────
+        log.info("[scheduler] Auto-scrape starting...")
+        _run_scrape()
+        log.info("[scheduler] Scrape complete. Next run in %.0fmin.", scrape_interval_hours * 60)
+
+        # ── Auto-settle pending paper bets ─────────────────────────────────────
+        try:
+            from src.data.auto_settle import settle_pending_paper_bets
+            r = settle_pending_paper_bets()
+            if r["settled"] > 0:
+                log.info("[scheduler] Auto-settled %d bets", r["settled"])
+        except Exception as e:
+            log.warning("[scheduler] Auto-settle failed: %s", e)
+
+        time.sleep(scrape_interval_hours * 3600)
+
+
 # ── run ────────────────────────────────────────────────────────────────────────
 
 def main():
+    import threading
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(message)s",
     )
     log.info("[api] Starting JOB-006 dashboard API on http://127.0.0.1:5000")
-    log.info("[api] Open dashboard/betting-dashboard.html in your browser")
+    log.info("[api] Background scheduler: backup daily + re-scrape every 2h")
+
+    t = threading.Thread(target=_background_scheduler, daemon=True, name="scheduler")
+    t.start()
+
     app.run(host="0.0.0.0", port=5000, debug=False)
 
 

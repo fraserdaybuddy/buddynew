@@ -16,13 +16,14 @@ Core thesis: books price WHO WINS, they underprice WHAT HAPPENS DURING THE MATCH
 | Tennis (ATP/WTA) | Total games O/U | Big server vs passive returner → mismatch → shorter match |
 
 ## Current Status (2026-03-12)
-- **Stage 2 ACTIVE** — paper testing phase started
+- **Stage 2 ACTIVE** — paper testing phase, 0 settled bets (ledger cleared this session)
 - **Tennis:** 5,632 ATP matches in DB (last date: 2024-12-18 — stale, live screener bypasses this)
 - **Darts:** 1,230 matches in DB
 - **Snooker:** 2,185 matches in DB
-- **Betfair:** Live markets scraped — 1,118+ rows (Indian Wells 2026)
-- **Dashboard:** Live at `http://127.0.0.1:5000` — all hardcoded data removed
+- **Betfair:** Live markets scraped — 1,680+ rows (Indian Wells 2026)
+- **Dashboard:** Live at `http://127.0.0.1:5000` — clean, all fake/hardcoded data removed
 - **Paper testing:** ACTIVE — bets logged to SQLite ledger, settled via dashboard WIN/LOSS buttons
+- **Staking model:** Full Kelly + tiered optimal caps (updated this session — see Staking Model section)
 
 ## Daily Startup
 ```
@@ -64,7 +65,7 @@ src/
   execution/
     betfair.py                     ← Betfair API client (cert login, list_markets, book)
     scraper.py                     ← poll COMBINED_TOTAL + NUMBER_OF_SETS → betfair_markets
-    governor.py                    ← Kelly fraction + stake limits
+    governor.py                    ← Full Kelly + tiered_cap() + circuit breaker
     ledger_writer.py               ← ledger write helpers
 
   scrapers/
@@ -77,7 +78,7 @@ data/
   backups/                         ← daily DB backups (auto-created by run_daily.py)
 
 dashboard/
-  betting-dashboard.html           ← live dashboard — 6 tabs, all live data
+  betting-dashboard.html           ← live dashboard — 5 tabs (Backtest removed), all live data
 ```
 
 ## API Endpoints (all at http://127.0.0.1:5000)
@@ -101,27 +102,49 @@ dashboard/
 | Betfair | Exchange API (cert auth) | Live O/U lines, liquidity |
 
 ## Staking Model
-Fractional Kelly with 3 confidence multipliers:
+Full Kelly with confidence scaling and tiered bankroll caps.
 
+### Kelly formula
 ```
-stake = bankroll × raw_kelly × KELLY_FRACTION × tier_mult × elo_confidence
+p          = (1 / decimal_odds) × (1 + edge)     ← model prob derived from market
+full_kelly = (b × p − (1−p)) / b                 ← standard Kelly fraction
+             where b = decimal_odds − 1
+fraction   = tier_mult × elo_confidence           ← confidence scaling (KELLY_FRACTION=1.0)
+raw_frac   = full_kelly × fraction
+stake      = bankroll × min(raw_frac, tiered_cap(edge))
+```
 
-KELLY_FRACTION = 0.25   (quarter-Kelly base)
+### Tiered optimal caps (governor.py → tiered_cap)
+Derived from Monte Carlo simulations (median growth subject to ruin < 5%, ±5% model noise):
 
+| Edge     | Full Kelly | Cap | vs old 5% cap |
+|----------|-----------|-----|---------------|
+| 5–9%     | 3–6%      | 8%  | baseline      |
+| 10–14%   | 6–10%     | 10% | +25%          |
+| 15–19%   | 9–14%     | 12% | +67%          |
+| 20–24%   | 12–17%    | 16% | +163%         |
+| 25–29%   | 15–22%    | 20% | +236%         |
+| 30%+     | 20–25%    | 22% | +272%         |
+
+### Confidence scaling
+```
 tier_mult:
   T1 (≥10 surface matches): 1.00
   T2 (3–9 matches):          0.70
   T3 (0–2 matches):          0.40
 
 elo_confidence:
-  gap < 50 pts:  0.0  (model has no edge — block bet)
-  gap 50–350:    linear 0→1
+  gap < 50 pts:  0.0  (model has no edge — block bet entirely)
+  gap 50–350:    linear 0 → 1
   gap ≥ 350:     1.0
+```
 
-Limits (governor.py):
-  MIN_STAKE = £5
-  MAX_STAKE = £500
-  MIN_EDGE  = 8%
+### Hard limits
+```
+MIN_STAKE = £5     (floor)
+MAX_STAKE = £500   (absolute £ ceiling, after tiered cap)
+MIN_EDGE  = 5%     (was 8% — lowered to surface more signals)
+MIN_ODDS  = 1.60   (dashboard filter only)
 ```
 
 ## Database Tables

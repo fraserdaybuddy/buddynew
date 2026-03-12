@@ -1029,6 +1029,8 @@
         <div class="table-header">
           <div class="table-title">Sniper Board — Top Edges <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--warn);margin-left:8px">min odds 1.60</span></div>
           <span class="status-pill pill-green" id="edge-count-pill">4 found</span>
+          <span id="odds-age-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-left:8px">odds: —</span>
+          <button onclick="refreshOdds()" id="refresh-odds-btn" style="margin-left:8px;background:rgba(255,255,255,0.05);color:var(--muted);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:4px 12px;font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace">&#8635; Refresh odds</button>
         </div>
         <div id="signals-blocker" style="display:none;padding:20px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--warn)"></div>
         <table>
@@ -1239,6 +1241,7 @@
           <div class="table-title" id="betlog-title">All Bets</div>
           <span class="status-pill pill-paper" id="betlog-summary">No bets yet</span>
           <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-left:4px" id="betlog-bank"></span>
+          <button onclick="autoSettle()" id="auto-settle-btn" style="margin-left:auto;background:rgba(0,255,135,0.08);color:var(--accent);border:1px solid rgba(0,255,135,0.25);border-radius:4px;padding:5px 14px;font-size:11px;cursor:pointer;font-family:'IBM Plex Mono',monospace">&#10227; Auto-settle</button>
         </div>
         <table>
           <thead>
@@ -1765,9 +1768,44 @@
   }
 
   // ── SNIPER BOARD — live from /api/signals ──────────────────────────────
+  async function updateOddsAge() {
+    try {
+      const d = await fetch(`${API_BASE}/api/scrape-status`).then(r => r.json());
+      const badge = document.getElementById('odds-age-badge');
+      if (!badge) return;
+      if (d.in_progress) { badge.textContent = 'odds: refreshing…'; badge.style.color = 'var(--yellow)'; return; }
+      if (!d.last_scraped_at) { badge.textContent = 'odds: not scraped'; badge.style.color = 'var(--red)'; return; }
+      const mins = Math.round((Date.now() - new Date(d.last_scraped_at).getTime()) / 60000);
+      const col = mins > 30 ? 'var(--warn)' : mins > 10 ? 'var(--yellow)' : 'var(--accent)';
+      badge.textContent = `odds: ${mins < 1 ? 'just now' : mins + 'min ago'}`;
+      badge.style.color = col;
+      if (mins > 30 && badge) badge.title = 'Odds may be stale — click Refresh odds';
+    } catch(e) {}
+  }
+
+  async function refreshOdds() {
+    const btn = document.getElementById('refresh-odds-btn');
+    const badge = document.getElementById('odds-age-badge');
+    if (btn) { btn.textContent = '⟳ Refreshing…'; btn.disabled = true; }
+    if (badge) { badge.textContent = 'odds: refreshing…'; badge.style.color = 'var(--yellow)'; }
+    try {
+      const r = await fetch(`${API_BASE}/api/scrape-now`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+      const d = await r.json();
+      if (!r.ok) { showToast(d.error || 'Refresh failed', 'error'); return; }
+      showToast('Odds refreshed from Betfair', 'success');
+      await updateOddsAge();
+      await loadSniperBoard();  // reload signals with fresh odds
+    } catch(e) {
+      showToast('API offline', 'error');
+    } finally {
+      if (btn) { btn.textContent = '↺ Refresh odds'; btn.disabled = false; }
+    }
+  }
+
   async function loadSniperBoard() {
     const tbody = document.getElementById('sniper-tbody');
     const pill  = document.getElementById('edge-count-pill');
+    await updateOddsAge();
     if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:20px;font-size:11px">Loading signals…</td></tr>';
     try {
       const date = new Date().toISOString().slice(0, 10);  // always use today — live Betfair screener doesn't use DB date
@@ -2312,6 +2350,30 @@ async function settleBet(rowid, result) {
     loadLedger();  // refresh table
   } catch(e) {
     showToast('API offline', 'error');
+  }
+}
+
+async function autoSettle() {
+  const btn = document.getElementById('auto-settle-btn');
+  if (btn) { btn.textContent = '⟳ Checking…'; btn.disabled = true; }
+  try {
+    const r = await fetch(`${API_BASE}/api/settle-auto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    if (!r.ok) { showToast(d.error || 'Auto-settle failed', 'error'); return; }
+    if (d.settled > 0) {
+      showToast(`Auto-settled ${d.settled} bet(s)`, 'success');
+      loadLedger();
+    } else {
+      showToast(`No settled markets found yet (${d.skipped} pending)`, 'info');
+    }
+  } catch(e) {
+    showToast('API offline', 'error');
+  } finally {
+    if (btn) { btn.textContent = '↺ Auto-settle'; btn.disabled = false; }
   }
 }
 

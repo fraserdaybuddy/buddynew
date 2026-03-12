@@ -274,24 +274,81 @@ localStorage JB.bets → no longer used for bets (bank setting still stored ther
 
 ---
 
+---
+
+## Session 2026-03-12 (Part 6) — Model Audit + Local Persistence + Auto-Settle
+
+**Outcome:** Model figures verified accurate. Server is now self-sustaining on local machine — auto-scrapes every 30 min, auto-settles paper bets from Betfair outcomes.
+
+### Model Audit Findings
+
+- **Sniper Board / Match Analyser — accurate ✓**
+  - Edge = `model_p - devig_market_p` (multiplicative devig) — correct
+  - `model_p` from Monte Carlo PMF — correct
+  - Kelly formula slightly non-standard (`(1/odds)*(1+edge)` vs direct `model_p`) — intentionally conservative, ~5% difference, safe
+  - Fair line = simulation median — correct
+  - Darts/snooker Poisson model + avg_legs — correct
+- **Bet Log P&L — accurate ✓** (uses `profit_loss_gbp` from API in GBP)
+- **Bet log edge column — always shows `—` (known issue)** — edge not stored in ledger schema
+- **Performance tab — broken (known issue)** — still reads from empty `JB.bets` localStorage; needs rewire to `/api/ledger` (deferred)
+
+### Built
+
+- **`src/api/server.py`** — background scheduler thread (starts 20s after launch):
+  - Daily DB backup (once per calendar day)
+  - Re-scrape all 3 sports every **30 minutes** (was: manual only)
+  - Auto-settle pending paper bets after each scrape
+  - `_scrape_state` dict tracks `last_scraped_at` / `in_progress`
+  - New endpoints: `GET /api/scrape-status`, `POST /api/scrape-now`, `POST /api/settle-auto`
+- **`src/data/auto_settle.py`** — auto-settle engine:
+  - Queries all PENDING paper bets from ledger
+  - Looks up market_id from betfair_markets by (event_name, market_type, line)
+  - Calls `listMarketBook` → if `status=CLOSED`, reads runner with `status=WINNER`
+  - `sortPriority=1` → OVER won, `sortPriority=2` → UNDER won
+  - Computes P&L and updates ledger; supports `--dry-run`
+  - Note: Betfair keeps settled market data ~24h — run within a day of match finishing
+- **`START_JOB006.bat`** — registers Windows Task Scheduler auto-start at login (first run only, requires admin)
+- **`dashboard/betting-dashboard.html`**:
+  - Sniper Board: "odds: Xmin ago" badge (green <10min / yellow <30min / orange >30min)
+  - Sniper Board: "↺ Refresh odds" button → `POST /api/scrape-now` → reloads signals
+  - Bet Log: "↺ Auto-settle" button → `POST /api/settle-auto`
+
+### Odds Staleness Fix
+Root cause: scraper ran once at startup; odds moved significantly pre-match (1.8 vs 2.78 observed).
+Fix: 30-min background scrape + "odds age" indicator + manual Refresh button.
+Delayed app key adds 3-min lag on top — negligible vs scrape interval.
+
+### Architecture: How the Local Machine Stays Current
+```
+Windows login → Task Scheduler → START_JOB006.bat (auto-registered first run)
+  → run_daily.py (backup + scrape + screen, prints signals)
+  → run_server.py starts Flask + background thread:
+       every 30min → re-scrape Betfair → update betfair_markets
+       every 30min → check PENDING bets → auto-settle if market CLOSED
+       daily       → DB backup
+Dashboard "Refresh odds" → immediate re-scrape on demand
+Dashboard "Auto-settle"  → immediate settle check on demand
+```
+
+---
+
 ## Next Session Priorities
 
-### P1 — Paper test run in progress
-Dashboard is live. Click PAPER on signals → settled via Bet Log WIN/LOSS buttons.
-Ledger cleared: clean slate, 0 bets.
-
-### P2 — Load 2025 Sackmann data
+### P1 — Load 2025 Sackmann data (HIGH)
 DB is 15 months stale. `screen_from_db()` returns 0 signals without 2026 data.
 ```
 Edit src/model/elo_warmup.py: extend year range 2019-2023 → 2019-2025
 PYTHONUTF8=1 python src/model/elo_warmup.py
 PYTHONUTF8=1 python src/scrapers/tennis/sackmann.py
+PYTHONUTF8=1 python src/model/elo_loader.py
+PYTHONUTF8=1 python src/model/form_builder.py
 ```
 
-### P3 — DONE ✓ Surface/format auto-detection
-Implemented via `TOURNAMENT_SURFACE_MAP` + `competition_name` column in `betfair_markets`.
+### P2 — Performance tab rewire (MEDIUM)
+`renderPerformance()` reads `JB.bets` (empty localStorage). Needs to call `GET /api/ledger` instead.
+Also fix ROI formula: currently `pnlUnits / stakeGBP` (wrong units) → should be `profit_loss_gbp / stake_gbp`.
 
-### P4 — Stale filter in live screener (do AFTER P2)
-Both `p1_last_match` / `p2_last_match` passed as `None` → stale filter bypassed.
+### P3 — Stale filter in live screener (do AFTER P1)
+Both `p1_last_match` / `p2_last_match` passed as `None` → stale 30-day filter bypassed.
 Fix: look up player_form for last match date after ELO lookup.
-**Note:** fixing this BEFORE P2 will block all signals (DB is 15 months stale).
+**Note:** do NOT fix before P1 — will block all signals while DB is stale.
