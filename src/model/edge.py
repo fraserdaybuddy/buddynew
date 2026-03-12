@@ -192,6 +192,28 @@ def check_filters(
     return True, None, passed
 
 
+# ── Poisson fair-line helper (darts / snooker) ────────────────────────────────
+
+def _p_poisson_over(mean: float, line: float) -> float:
+    """
+    P(X > line) where X ~ Poisson(mean).
+    Handles half-lines: P(X > 4.5) = P(X >= 5).
+    Uses log-space accumulation to avoid overflow for large means.
+    """
+    import math
+    if mean <= 0:
+        return 0.0
+    k_max = int(line)  # floor — P(X <= k_max) = CDF at k_max
+    log_mean = math.log(mean)
+    log_pmf = -mean   # log P(X=0)
+    cdf = 0.0
+    for k in range(k_max + 1):
+        cdf += math.exp(log_pmf)
+        if k < k_max:
+            log_pmf += log_mean - math.log(k + 1)
+    return max(0.0, min(1.0, 1.0 - cdf))
+
+
 # ── Tournament surface / format lookup ────────────────────────────────────────
 #
 # Maps tournament name keywords (lowercase) → (surface, best_of).
@@ -692,6 +714,50 @@ def _lookup_elo_by_name(conn: sqlite3.Connection, query: str, surface: str) -> t
     return None, 1500.0, query, 0
 
 
+def _lookup_form_by_name(conn: sqlite3.Connection, query: str, sport: str) -> tuple:
+    """
+    Find player_id and form stats for a darts/snooker player by name fragment.
+    Returns (player_id, full_name, avg_stat_per_leg, match_count) or (None, query, 0.30, 0).
+    avg_stat_per_leg = avg_180s_per_leg for darts, avg_centuries_per_frame for snooker.
+    """
+    stat_col = "avg_180s_per_leg" if sport == "darts" else "avg_centuries_per_frame"
+    default  = 0.30 if sport == "darts" else 0.08
+
+    def _search(fragment):
+        row = conn.execute(
+            f"""SELECT p.player_id, p.full_name,
+                       pf.{stat_col} as stat, pf.matches_counted
+                FROM players p
+                LEFT JOIN player_aliases pa ON p.player_id = pa.player_id
+                LEFT JOIN player_form pf
+                       ON p.player_id = pf.player_id AND pf.sport = ?
+                WHERE (p.full_name LIKE ? COLLATE NOCASE
+                    OR pa.raw_name  LIKE ? COLLATE NOCASE)
+                ORDER BY pf.as_of_date DESC NULLS LAST, pf.matches_counted DESC NULLS LAST
+                LIMIT 1""",
+            (sport, f"%{fragment}%", f"%{fragment}%")
+        ).fetchone()
+        return dict(row) if row else None
+
+    result = _search(query)
+    if not result:
+        surname = query.strip().split()[-1]
+        if len(surname) >= 3 and surname != query.strip():
+            result = _search(surname)
+    if not result:
+        for word in query.strip().split():
+            if len(word) >= 4:
+                result = _search(word)
+                if result:
+                    break
+
+    if result and result["player_id"]:
+        stat  = result["stat"] or default
+        count = result["matches_counted"] or 0
+        return result["player_id"], result["full_name"], stat, count
+    return None, query, default, 0
+
+
 def screen_from_betfair_markets(
     sport: str = "tennis",
     surface: str = "",
@@ -703,16 +769,14 @@ def screen_from_betfair_markets(
     """
     Live screener that works WITHOUT needing 2026 matches in the DB.
 
-    Reads event names directly from betfair_markets (already populated by
-    run_presession.py), looks up each player's ELO from elo_ratings, runs
-    the Monte Carlo simulation, and computes edge vs the live Betfair line.
+    Tennis: ELO lookup → Monte Carlo simulation → edge vs Betfair line.
+    Darts:  player_form avg_180s_per_leg + Poisson fair-line model.
+    Snooker: player_form avg_centuries_per_frame + Poisson fair-line model.
 
     Surface and best_of are auto-detected from competition_name using
-    TOURNAMENT_SURFACE_MAP.  Pass surface/best_of explicitly to override.
+    TOURNAMENT_SURFACE_MAP (tennis only).  Pass surface/best_of explicitly to override.
 
     Only processes markets with total_matched >= min_liquidity.
-    Uses the line closest to the model's fair median for edge calculation.
-
     Returns list of BetSignal — one per event per market type.
     """
     from src.model.simulate import simulate, elo_to_hold_probs
@@ -760,11 +824,73 @@ def screen_from_betfair_markets(
             continue
         name_a, name_b = parts
 
-        # Auto-detect surface and best_of from competition name unless overridden
+        match_id = f"BF:{event_name[:24].replace(' ','_')}"
+
+        # ── Darts / Snooker — form-based Poisson model ────────────────────
+        if sport in ("darts", "snooker"):
+            from src.execution.governor import kelly_stake as kelly_stake_fn
+            stat_mkt = "total_180s" if sport == "darts" else "total_centuries"
+            if stat_mkt not in markets:
+                continue
+
+            p1_id, p1_name, p1_stat, p1_n = _lookup_form_by_name(conn, name_a, sport)
+            p2_id, p2_name, p2_stat, p2_n = _lookup_form_by_name(conn, name_b, sport)
+
+            # Average legs/frames per match from historical DB
+            legs_col = "legs_sets_total"
+            avg_row = conn.execute(
+                f"SELECT AVG({legs_col}) FROM matches WHERE sport=? AND {legs_col} IS NOT NULL",
+                (sport,)
+            ).fetchone()
+            avg_legs = (avg_row[0] or 0) if avg_row else 0
+            if avg_legs < 5:
+                avg_legs = 18.0 if sport == "darts" else 25.0  # safe defaults
+
+            fair = (p1_stat + p2_stat) * avg_legs
+            tier = 1 if min(p1_n, p2_n) >= 10 else (2 if min(p1_n, p2_n) >= 3 else 3)
+
+            market_rows_list = markets[stat_mkt]
+            best_row = min(market_rows_list, key=lambda r: abs(r["line"] - fair))
+            line       = best_row["line"]
+            over_odds  = best_row["over_odds"]
+            under_odds = best_row["under_odds"]
+            matched    = best_row["total_matched"] or 0
+
+            if not over_odds or not under_odds:
+                continue
+
+            p_over  = _p_poisson_over(fair, line)
+            p_under = 1.0 - p_over
+            mkt_p_over, mkt_p_under = devig_2way(over_odds, under_odds)
+
+            from datetime import date as _date
+            for direction, model_p, market_p, edge_val, odds in [
+                ("OVER",  p_over,  mkt_p_over,  p_over  - mkt_p_over,  over_odds),
+                ("UNDER", p_under, mkt_p_under, p_under - mkt_p_under, under_odds),
+            ]:
+                fraction = (TIER_MULT.get(tier, 0.40) *
+                            min(max((p1_n + p2_n) / 20.0, 0.0), 1.0))  # scale by data volume
+                stake = (kelly_stake_fn(bankroll, edge_val, odds, fraction=fraction)
+                         if edge_val >= MIN_EDGE else 0.0)
+                signals.append(BetSignal(
+                    match_id=match_id, sport=sport,
+                    market_type=stat_mkt,
+                    direction=direction, line=line,
+                    model_p=round(model_p, 4), market_p=round(market_p, 4),
+                    edge=round(edge_val, 4), odds=odds,
+                    kelly_frac=round(fraction, 4), stake_gbp=stake,
+                    tier=tier, mode=mode, synthetic_line=False,
+                    filters_passed=["form_data_ok"],
+                    reject_reason=None if edge_val >= MIN_EDGE else f"edge {edge_val:+.1%} < {MIN_EDGE:.0%}",
+                    fair_line=round(fair, 1), event_name=event_name,
+                ))
+            continue  # skip tennis logic below
+
+        # ── Tennis — ELO + Monte Carlo ─────────────────────────────────────
         comp_name = event_competition.get(event_name, "")
         ev_surface, ev_best_of = _detect_surface_and_format(comp_name)
-        if surface:     ev_surface = surface   # explicit override
-        if best_of > 0: ev_best_of = best_of   # explicit override
+        if surface:     ev_surface = surface
+        if best_of > 0: ev_best_of = best_of
         log.debug(f"[edge] {event_name!r} comp={comp_name!r} → surface={ev_surface} BO{ev_best_of}")
 
         p1_id, p1_elo, p1_name, p1_n = _lookup_elo_by_name(conn, name_a, ev_surface)
@@ -775,10 +901,6 @@ def screen_from_betfair_markets(
         elo_gap = p1_elo - p2_elo
         abs_gap = abs(elo_gap)
 
-        # Build a synthetic match_id from event name
-        match_id = f"BF:{event_name[:24].replace(' ','_')}"
-
-        # Run simulation
         try:
             s_a, s_b = elo_to_hold_probs(elo_gap, ev_surface, ev_best_of)
             sim = simulate(s_a, s_b, ev_best_of, tiebreak_rule="standard", n=10_000, seed=42)
@@ -789,7 +911,6 @@ def screen_from_betfair_markets(
         tier = 1 if min(p1_n or 0, p2_n or 0) >= 10 else (2 if min(p1_n or 0, p2_n or 0) >= 3 else 3)
 
         for market_type, market_rows in markets.items():
-            # Pick the line closest to the model's fair line
             if market_type == "total_games":
                 fair = sim.fair_line_games()
                 p_over_fn  = sim.p_games_over

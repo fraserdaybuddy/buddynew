@@ -1811,8 +1811,18 @@
     try {
       const date = new Date().toISOString().slice(0, 10);  // always use today — live Betfair screener doesn't use DB date
 
-      const r = await fetch(`${API_BASE}/api/signals?date=${date}&sport=tennis&bankroll=${JB.bank || 1000}`);
-      const d = await r.json();
+      const bankroll = JB.bank || 1000;
+      const [dTennis, dDarts, dSnooker] = await Promise.all([
+        fetch(`${API_BASE}/api/signals?date=${date}&sport=tennis&bankroll=${bankroll}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/signals?date=${date}&sport=darts&bankroll=${bankroll}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/signals?date=${date}&sport=snooker&bankroll=${bankroll}`).then(r => r.json()),
+      ]);
+      const d = {
+        signals: [...(dTennis.signals||[]), ...(dDarts.signals||[]), ...(dSnooker.signals||[])],
+        bets:    (dTennis.bets||0) + (dDarts.bets||0) + (dSnooker.bets||0),
+        total:   (dTennis.total||0) + (dDarts.total||0) + (dSnooker.total||0),
+        error:   dTennis.error || dDarts.error || dSnooker.error,
+      };
       if (d.error) throw new Error(d.error);
 
       // Deduplicate: best edge per event+market
