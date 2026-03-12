@@ -12,10 +12,12 @@ Output:
   - BetSignal dataclass with stake, direction, edge
   - Written to ledger in PAPER mode; sent to Betfair API in LIVE mode
 
-Kelly formula:
-  kelly_frac = (p * b - (1-p)) / b
+Kelly formula (full Kelly with tiered cap):
+  p = (1 / odds) * (1 + edge)           — model p derived from market implied
+  full_kelly = (b * p - (1-p)) / b      — standard Kelly fraction
   where b = decimal_odds - 1
-  stake = bankroll * kelly_frac * tier_mult * confidence_cap
+  fraction = tier_mult * elo_confidence  — confidence scaling
+  stake = bankroll * full_kelly * fraction, capped at tiered_cap(edge) % of bank
 
 Tier multipliers (from MODEL_STRATEGY.md):
   T1 (≥10 matches): 1.00
@@ -48,7 +50,7 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "universe.db"
 # ── Kelly constants ────────────────────────────────────────────────────────────
 
 TIER_MULT = {1: 1.00, 2: 0.70, 3: 0.40}
-MIN_EDGE = 0.08             # 8% minimum edge
+MIN_EDGE = 0.05             # 5% minimum edge
 MIN_ELO_GAP = 50.0          # minimum ELO separation (Gate 4 validated)
 MIN_LIQUIDITY_GBP = 50.0    # minimum matched volume on Betfair
 STALE_DAYS = 30             # last match must be within 30 days
@@ -104,13 +106,13 @@ def recommended_stake(
     """
     Returns (fraction_used, stake_gbp) via governor.kelly_stake().
 
-    Confidence fraction = KELLY_FRACTION × tier_mult × elo_confidence
-      KELLY_FRACTION — base quarter-Kelly (0.25), same as all other models
+    Full Kelly with confidence scaling and tiered cap:
+      fraction = tier_mult × elo_confidence  (KELLY_FRACTION=1.0, full Kelly base)
       tier_mult      — data quality: T1=1.0  T2=0.70  T3=0.40
       elo_confidence — ELO separation: 0.0 at gap=50 → 1.0 at gap=350+
 
-    Governor handles min_stake (£5) and max_stake (£500) clamping.
-    No separate hard cap here — the fraction IS the confidence weight.
+    Governor applies tiered bankroll % cap (8–22% depending on edge)
+    and absolute £500 ceiling. Floored at £5.
     """
     from src.execution.governor import kelly_stake, KELLY_FRACTION
     tier_mult = TIER_MULT.get(tier, 0.40)

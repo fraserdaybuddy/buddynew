@@ -2377,12 +2377,12 @@ async function loadLedger() {
       // Format bet_direction: "COMBINED_TOTAL_OVER" → "Total Games O/19.5"
       // "NUMBER_OF_SETS_OVER" → "No. of Sets — Three"
       const dirRaw = row.bet_direction || '';
-      const dirMatch = dirRaw.match(/^(COMBINED_TOTAL|NUMBER_OF_SETS)_(OVER|UNDER)$/i);
+      const dirMatch = dirRaw.match(/^(total_games|total_sets|number_of_sets)_(OVER|UNDER)$/i);
       let betLabel;
       if (dirMatch) {
-        const mkt = dirMatch[1].toUpperCase();
+        const mkt = dirMatch[1].toLowerCase();
         const dir = dirMatch[2].toUpperCase();
-        if (mkt === 'COMBINED_TOTAL') {
+        if (mkt === 'total_games') {
           betLabel = `Total Games ${dir === 'OVER' ? 'O' : 'U'}/${row.line}`;
         } else {
           betLabel = dir === 'OVER' ? 'No. of Sets — Three' : 'No. of Sets — Two';

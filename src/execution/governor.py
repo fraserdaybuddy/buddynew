@@ -20,11 +20,39 @@ log = logging.getLogger("governor")
 # ─────────────────────────────────────────────
 
 LIVE_MODE          = os.environ.get("LIVE_MODE", "").strip().lower() == "true"
-KELLY_FRACTION     = float(os.environ.get("KELLY_FRACTION",    "0.25"))  # quarter Kelly
+KELLY_FRACTION     = float(os.environ.get("KELLY_FRACTION",    "1.0"))   # full Kelly
 MIN_STAKE_GBP      = float(os.environ.get("MIN_STAKE_GBP",     "5.0"))
-MAX_STAKE_GBP      = float(os.environ.get("MAX_STAKE_GBP",     "500.0"))
+MAX_STAKE_GBP      = float(os.environ.get("MAX_STAKE_GBP",     "500.0")) # absolute £ ceiling
 MAX_CONSEC_LOSSES  = int(  os.environ.get("MAX_CONSEC_LOSSES", "5"))     # halt after N in a row
 MAX_DRAWDOWN_PCT   = float(os.environ.get("MAX_DRAWDOWN_PCT",  "0.20"))  # 20% of bankroll
+
+
+# ─────────────────────────────────────────────
+# Tiered bankroll cap — derived from simulation
+# Replaces the old flat 5% cap. Caps grow with edge because at higher edges
+# the Kelly stake is proportionally more justified. Source: run_simulations.py
+# ─────────────────────────────────────────────
+
+def tiered_cap(edge: float) -> float:
+    """
+    Return the maximum bankroll fraction for a given edge (decimal, e.g. 0.08).
+    Derived from Monte Carlo simulations optimising median growth subject to
+    ruin probability < 5% with ±5% model noise.
+
+    Edge       Full Kelly    Cap
+    5–9%       3–6%          8%
+    10–14%     6–10%         10%
+    15–19%     9–14%         12%
+    20–24%     12–17%        16%
+    25–29%     15–22%        20%
+    30%+       20–25%        22%
+    """
+    if edge < 0.10:  return 0.08
+    if edge < 0.15:  return 0.10
+    if edge < 0.20:  return 0.12
+    if edge < 0.25:  return 0.16
+    if edge < 0.30:  return 0.20
+    return 0.22
 
 
 # ─────────────────────────────────────────────
@@ -40,17 +68,28 @@ def kelly_stake(
     max_stake: float = MAX_STAKE_GBP,
 ) -> float:
     """
-    Calculate Kelly criterion stake, capped and floored.
+    Calculate Kelly criterion stake using the proper Kelly formula, with
+    tiered bankroll cap and absolute £ ceiling.
+
+    Kelly formula:
+        p = (1 / odds) * (1 + edge)       — model probability derived from market
+        q = 1 - p
+        full_kelly = (b * p - q) / b      — standard Kelly fraction
+        where b = decimal_odds - 1
+
+    Cap applied (whichever is smaller):
+        1. tiered_cap(edge)  — bankroll % cap that grows with edge (e.g. 8–22%)
+        2. max_stake         — absolute £ ceiling (default £500)
 
     Args:
         bankroll_gbp: current bankroll in GBP
         edge:         model edge as decimal e.g. 0.08 = 8%
         odds:         decimal odds e.g. 1.85
-        fraction:     fractional Kelly multiplier (default 0.25 = quarter Kelly)
+        fraction:     Kelly multiplier (1.0 = full Kelly, default)
 
     Returns:
-        Stake in GBP, rounded to nearest £1, clamped to [min_stake, max_stake].
-        Returns 0.0 if edge <= 0 (no bet).
+        Stake in GBP, rounded to nearest £1, floored at min_stake.
+        Returns 0.0 if edge <= 0 or full_kelly <= 0.
     """
     if edge <= 0:
         return 0.0
@@ -59,9 +98,21 @@ def kelly_stake(
     if b <= 0:
         return 0.0
 
-    # Full Kelly fraction = edge / (odds - 1)
-    full_kelly = edge / b
-    raw_stake = bankroll_gbp * full_kelly * fraction
+    # Proper Kelly: derive p from market implied probability scaled by edge
+    p = (1.0 / odds) * (1.0 + edge)
+    q = 1.0 - p
+    full_kelly = (b * p - q) / b
+
+    if full_kelly <= 0:
+        return 0.0
+
+    # Apply fraction multiplier (tier_mult × elo_confidence from edge.py)
+    adjusted_kelly = full_kelly * fraction
+
+    # Apply tiered bankroll cap (smaller of: cap% of bank, or £max_stake)
+    cap_frac  = tiered_cap(edge)
+    capped_frac = min(adjusted_kelly, cap_frac)
+    raw_stake = bankroll_gbp * capped_frac
 
     if raw_stake <= 0:
         return 0.0
