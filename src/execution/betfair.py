@@ -209,7 +209,7 @@ def list_markets(
 
     body = {
         "filter":        mkt_filter,
-        "marketProjection": ["MARKET_START_TIME", "EVENT", "RUNNER_DESCRIPTION"],
+        "marketProjection": ["MARKET_START_TIME", "EVENT", "COMPETITION", "RUNNER_DESCRIPTION"],
         "maxResults":    str(max_results),
         "sort":          "FIRST_TO_START",
     }

@@ -192,6 +192,104 @@ def check_filters(
     return True, None, passed
 
 
+# ── Tournament surface / format lookup ────────────────────────────────────────
+#
+# Maps tournament name keywords (lowercase) → (surface, best_of).
+# Keys are substrings matched against the Betfair competition_name.
+# Grand Slams use best_of=5 (ATP); WTA Grand Slams are BO3 but we can't
+# distinguish WTA vs ATP from market data alone — BO5 is the safer default
+# since most liquidity is ATP.  Non-Grand-Slam events are always BO3.
+#
+TOURNAMENT_SURFACE_MAP: list[tuple[str, str, int]] = [
+    # Grass
+    ("wimbledon",         "Grass", 5),
+    ("queen's",           "Grass", 3),
+    ("queens",            "Grass", 3),
+    ("eastbourne",        "Grass", 3),
+    ("halle",             "Grass", 3),
+    ("s-hertogenbosch",   "Grass", 3),
+    ("nottingham",        "Grass", 3),
+    ("birmingham",        "Grass", 3),
+    # Clay — Grand Slam
+    ("roland garros",     "Clay",  5),
+    ("french open",       "Clay",  5),
+    # Clay — Masters / 500 / 250
+    ("monte carlo",       "Clay",  3),
+    ("monte-carlo",       "Clay",  3),
+    ("madrid",            "Clay",  3),
+    ("rome",              "Clay",  3),
+    ("internazionali",    "Clay",  3),
+    ("barcelona",         "Clay",  3),
+    ("hamburg",           "Clay",  3),
+    ("munich",            "Clay",  3),
+    ("estoril",           "Clay",  3),
+    ("lyon",              "Clay",  3),
+    ("geneva",            "Clay",  3),
+    ("istanbul",          "Clay",  3),
+    ("buenos aires",      "Clay",  3),
+    ("rio",               "Clay",  3),
+    ("acapulco",          "Clay",  3),
+    ("santiago",          "Clay",  3),
+    ("marrakech",         "Clay",  3),
+    ("bastad",            "Clay",  3),
+    ("kitzbuhel",         "Clay",  3),
+    ("umag",              "Clay",  3),
+    ("gstaad",            "Clay",  3),
+    # Hard — Grand Slams
+    ("australian open",   "Hard",  5),
+    ("us open",           "Hard",  5),
+    # Hard — Masters / 500 / 250
+    ("indian wells",      "Hard",  3),
+    ("bnp paribas open",  "Hard",  3),
+    ("miami",             "Hard",  3),
+    ("canada",            "Hard",  3),
+    ("cincinnati",        "Hard",  3),
+    ("western & southern","Hard",  3),
+    ("shanghai",          "Hard",  3),
+    ("paris",             "Hard",  3),
+    ("bercy",             "Hard",  3),
+    ("vienna",            "Hard",  3),
+    ("basel",             "Hard",  3),
+    ("stockholm",         "Hard",  3),
+    ("moscow",            "Hard",  3),
+    ("doha",              "Hard",  3),
+    ("dubai",             "Hard",  3),
+    ("abu dhabi",         "Hard",  3),
+    ("adelaide",          "Hard",  3),
+    ("auckland",          "Hard",  3),
+    ("sydney",            "Hard",  3),
+    ("brisbane",          "Hard",  3),
+    ("hong kong",         "Hard",  3),
+    ("beijing",           "Hard",  3),
+    ("tokyo",             "Hard",  3),
+    ("antwerp",           "Hard",  3),
+    ("washington",        "Hard",  3),
+    ("atlanta",           "Hard",  3),
+    ("los cabos",         "Hard",  3),
+    ("winston-salem",     "Hard",  3),
+    ("metz",              "Hard",  3),
+    ("gijon",             "Hard",  3),
+    ("nur-sultan",        "Hard",  3),
+]
+
+_DEFAULT_SURFACE = "Hard"
+_DEFAULT_BEST_OF = 3
+
+
+def _detect_surface_and_format(competition_name: str) -> tuple[str, int]:
+    """
+    Infer (surface, best_of) from Betfair competition_name using keyword matching.
+    Returns (_DEFAULT_SURFACE, _DEFAULT_BEST_OF) if no match found.
+    """
+    if not competition_name:
+        return _DEFAULT_SURFACE, _DEFAULT_BEST_OF
+    lower = competition_name.lower()
+    for keyword, surface, best_of in TOURNAMENT_SURFACE_MAP:
+        if keyword in lower:
+            return surface, best_of
+    return _DEFAULT_SURFACE, _DEFAULT_BEST_OF
+
+
 # ── Tennis edge screener ───────────────────────────────────────────────────────
 
 def screen_tennis_match(
@@ -596,8 +694,8 @@ def _lookup_elo_by_name(conn: sqlite3.Connection, query: str, surface: str) -> t
 
 def screen_from_betfair_markets(
     sport: str = "tennis",
-    surface: str = "Hard",
-    best_of: int = 3,
+    surface: str = "",
+    best_of: int = 0,
     bankroll: float = 1000.0,
     mode: str = "PAPER",
     min_liquidity: float = 50.0,
@@ -608,6 +706,9 @@ def screen_from_betfair_markets(
     Reads event names directly from betfair_markets (already populated by
     run_presession.py), looks up each player's ELO from elo_ratings, runs
     the Monte Carlo simulation, and computes edge vs the live Betfair line.
+
+    Surface and best_of are auto-detected from competition_name using
+    TOURNAMENT_SURFACE_MAP.  Pass surface/best_of explicitly to override.
 
     Only processes markets with total_matched >= min_liquidity.
     Uses the line closest to the model's fair median for edge calculation.
@@ -621,11 +722,12 @@ def screen_from_betfair_markets(
 
     # Get distinct events with their best lines (by liquidity)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(betfair_markets)").fetchall()]
-    ev_col = "event_name" if "event_name" in cols else "NULL"
+    ev_col   = "event_name"       if "event_name"       in cols else "NULL"
+    comp_col = "competition_name" if "competition_name" in cols else "NULL"
 
     rows = conn.execute(
-        f"""SELECT {ev_col} as event_name, market_type,
-                  line, over_odds, under_odds, total_matched
+        f"""SELECT {ev_col} as event_name, {comp_col} as competition_name,
+                  market_type, line, over_odds, under_odds, total_matched
            FROM betfair_markets
            WHERE sport = ?
              AND over_odds IS NOT NULL
@@ -639,11 +741,15 @@ def screen_from_betfair_markets(
         conn.close()
         return []
 
-    # Group rows: event_name → market_type → list of (line, over, under, matched)
+    # Group rows: (event_name, competition_name) → market_type → list of rows
     from collections import defaultdict
     events: dict = defaultdict(lambda: defaultdict(list))
+    event_competition: dict = {}
     for r in rows:
-        events[r["event_name"]][r["market_type"]].append(dict(r))
+        key = r["event_name"]
+        events[key][r["market_type"]].append(dict(r))
+        if key not in event_competition:
+            event_competition[key] = r["competition_name"] or ""
 
     signals = []
 
@@ -654,8 +760,15 @@ def screen_from_betfair_markets(
             continue
         name_a, name_b = parts
 
-        p1_id, p1_elo, p1_name, p1_n = _lookup_elo_by_name(conn, name_a, surface)
-        p2_id, p2_elo, p2_name, p2_n = _lookup_elo_by_name(conn, name_b, surface)
+        # Auto-detect surface and best_of from competition name unless overridden
+        comp_name = event_competition.get(event_name, "")
+        ev_surface, ev_best_of = _detect_surface_and_format(comp_name)
+        if surface:     ev_surface = surface   # explicit override
+        if best_of > 0: ev_best_of = best_of   # explicit override
+        log.debug(f"[edge] {event_name!r} comp={comp_name!r} → surface={ev_surface} BO{ev_best_of}")
+
+        p1_id, p1_elo, p1_name, p1_n = _lookup_elo_by_name(conn, name_a, ev_surface)
+        p2_id, p2_elo, p2_name, p2_n = _lookup_elo_by_name(conn, name_b, ev_surface)
 
         p1_elo = p1_elo or 1500.0
         p2_elo = p2_elo or 1500.0
@@ -667,8 +780,8 @@ def screen_from_betfair_markets(
 
         # Run simulation
         try:
-            s_a, s_b = elo_to_hold_probs(elo_gap, surface, best_of)
-            sim = simulate(s_a, s_b, best_of, tiebreak_rule="standard", n=10_000, seed=42)
+            s_a, s_b = elo_to_hold_probs(elo_gap, ev_surface, ev_best_of)
+            sim = simulate(s_a, s_b, ev_best_of, tiebreak_rule="standard", n=10_000, seed=42)
         except Exception as e:
             log.warning(f"[edge] simulation failed for {event_name}: {e}")
             continue

@@ -55,7 +55,10 @@ DASHBOARD = Path(__file__).parent.parent.parent / "dashboard" / "betting-dashboa
 
 @app.route("/")
 def index():
-    return send_file(DASHBOARD)
+    resp = send_file(DASHBOARD)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # ── CORS (needed for file:// origin) ──────────────────────────────────────────
@@ -189,7 +192,7 @@ def signals():
         # Fall back to live Betfair event screener when no DB matches for date
         if not raw and sport == "tennis":
             raw = screen_from_betfair_markets(
-                sport=sport, surface="Hard", best_of=3,
+                sport=sport,
                 bankroll=bankroll, mode=mode, min_liquidity=50.0,
             )
     except Exception as e:
@@ -511,15 +514,14 @@ def analyse():
         # Edge
         edge = model_p - mkt_p
 
-        # Kelly stake
+        # Kelly stake — use governor for consistent formula
+        from src.execution.governor import kelly_stake, KELLY_FRACTION
         tier = 1  # assume T1 for manual analysis
-        elo_conf = elo_confidence(abs_gap)
-        kelly_frac = 0.25 * TIER_MULT[tier] * elo_conf
-        b = book_odds - 1.0
-        raw_kelly = (model_p * b - (1 - model_p)) / b if b > 0 else 0
-        raw_kelly = max(0.0, raw_kelly)
-        stake = bankroll * raw_kelly * kelly_frac
-        stake = round(max(0.0, min(stake, 500.0)), 2)
+        elo_conf   = elo_confidence(abs_gap)
+        tier_mult  = TIER_MULT[tier]
+        fraction   = KELLY_FRACTION * tier_mult * elo_conf
+        kelly_frac = fraction
+        stake = kelly_stake(bankroll, edge, book_odds, fraction=fraction) if edge > 0 else 0.0
 
         return jsonify({
             "p1": {
@@ -559,7 +561,7 @@ def analyse():
             "reject_reason": (
                 f"ELO gap {abs_gap:.0f} < {MIN_ELO_GAP} (no edge for equal players)"
                 if abs_gap < MIN_ELO_GAP else
-                f"Edge {edge:+.1%} below 8% threshold"
+                f"Edge {edge:+.1%} below {MIN_EDGE:.0%} threshold"
                 if edge < MIN_EDGE else
                 None
             ),

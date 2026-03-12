@@ -249,12 +249,13 @@ def link_markets_to_matches(
     # For now: group unlinked rows by their base betfair market ID and use a
     # cached event_name if available in the 'data_source' field as a workaround.
     # The proper fix: add event_name column. We add it via ALTER IF NOT EXISTS.
-    try:
-        conn.execute("ALTER TABLE betfair_markets ADD COLUMN event_name TEXT")
-        conn.commit()
-        log.info("[linker] Added event_name column to betfair_markets")
-    except Exception:
-        pass  # column already exists
+    for col in ("event_name", "competition_name"):
+        try:
+            conn.execute(f"ALTER TABLE betfair_markets ADD COLUMN {col} TEXT")
+            conn.commit()
+            log.info(f"[linker] Added {col} column to betfair_markets")
+        except Exception:
+            pass  # column already exists
 
     # Now re-query with event_name
     unlinked = conn.execute(
@@ -344,13 +345,14 @@ def poll_sport(
     conn = None if dry_run else get_conn()
     rows_written = 0
 
-    # Ensure event_name column exists
+    # Ensure event_name and competition_name columns exist
     if conn:
-        try:
-            conn.execute("ALTER TABLE betfair_markets ADD COLUMN event_name TEXT")
-            conn.commit()
-        except Exception:
-            pass
+        for col in ("event_name", "competition_name"):
+            try:
+                conn.execute(f"ALTER TABLE betfair_markets ADD COLUMN {col} TEXT")
+                conn.commit()
+            except Exception:
+                pass
 
     try:
         for betfair_type, internal_type, name_guard in specs:
@@ -380,6 +382,7 @@ def poll_sport(
                 mid              = book["marketId"]
                 catalogue        = meta.get(mid, {})
                 event_name       = catalogue.get("event", {}).get("name", "")
+                competition_name = catalogue.get("competition", {}).get("name", "")
                 cat_runners      = catalogue.get("runners", [])
                 book_runners     = book.get("runners", [])
                 # Market-level totalMatched (EX_TRADED not requested — use as liquidity proxy)
@@ -418,15 +421,16 @@ def poll_sport(
                         INSERT INTO betfair_markets
                             (market_id, match_id, sport, market_type, line,
                              over_odds, under_odds, total_matched,
-                             event_name, data_source, verified)
-                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'betfair_api_live', 0)
+                             event_name, competition_name, data_source, verified)
+                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'betfair_api_live', 0)
                         ON CONFLICT(market_id) DO UPDATE SET
-                            over_odds     = excluded.over_odds,
-                            under_odds    = excluded.under_odds,
-                            total_matched = excluded.total_matched,
-                            event_name    = excluded.event_name
+                            over_odds        = excluded.over_odds,
+                            under_odds       = excluded.under_odds,
+                            total_matched    = excluded.total_matched,
+                            event_name       = excluded.event_name,
+                            competition_name = excluded.competition_name
                     """, (row_key, sport, internal_type, hcap,
-                          over_odds, under_odds, matched, event_name))
+                          over_odds, under_odds, matched, event_name, competition_name))
 
         if conn:
             conn.commit()
