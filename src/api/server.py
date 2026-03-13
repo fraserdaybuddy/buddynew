@@ -299,7 +299,7 @@ def ledger():
     rows = conn.execute(
         f"""SELECT l.rowid, l.bet_id, l.match_id, l.sport, l.bet_direction, l.line,
                   l.odds_taken, l.stake_gbp, l.status, l.profit_loss_gbp,
-                  l.placed_at, l.settled_at, l.mode,
+                  l.placed_at, l.settled_at, l.mode, l.edge,
                   m.match_date, m.player1_id, m.player2_id
            FROM ledger l
            LEFT JOIN matches m ON l.match_id = m.match_id
@@ -383,9 +383,9 @@ def place_bet():
     conn.execute(
         """INSERT INTO ledger
              (bet_id, match_id, sport, bet_direction, line, odds_taken,
-              stake_gbp, status, mode, placed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, datetime('now'))""",
-        (bet_id, match, sport, bet_dir, line, odds, stake, mode)
+              stake_gbp, status, mode, edge, placed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, datetime('now'))""",
+        (bet_id, match, sport, bet_dir, line, odds, stake, mode, edge or None)
     )
     conn.commit()
     rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

@@ -1531,22 +1531,33 @@
   }
 
   // ── BANK BAR ───────────────────────────────────────────────────────────
-  function updateBankBar() {
-    const settled = JB.bets.filter(b => b.result !== 'PENDING');
-    const pnl = settled.reduce((s, b) => s + (b.pnlUnits || 0), 0);
-    const wins = settled.filter(b => b.result === 'WIN').length;
-    const open = JB.bets.filter(b => b.result === 'PENDING').length;
-    const odds = settled.map(b => b.odds).filter(Boolean);
-    const avgOdds = odds.length ? (odds.reduce((a,b)=>a+b,0)/odds.length).toFixed(2) : '—';
-
-    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-    set('bb-bank', JB.bank > 0 ? '£' + JB.bank.toFixed(2) : '£—');
-    const pnlEl = document.getElementById('bb-pnl');
-    if (pnlEl) { pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(1) + 'u'; pnlEl.style.color = pnl >= 0 ? 'var(--accent)' : 'var(--red)'; }
-    set('bb-open', open);
-    set('bb-wr', settled.length ? Math.round(wins/settled.length*100) + '%' : '—');
-    set('bb-odds', avgOdds);
+  async function updateBankBar() {
     updateSniperKelly();
+    try {
+      const r = await fetch(`${API_BASE}/api/ledger?limit=500`);
+      const d = await r.json();
+      const sum = d.summary || {};
+      const rows = d.rows || [];
+      const pnl = sum.total_pnl || 0;
+      const bank = JB.bank + pnl;
+      const open = rows.filter(b => b.status === 'PENDING').length;
+      const settled = rows.filter(b => b.status !== 'PENDING');
+      const wins = settled.filter(b => b.status === 'WON').length;
+      const allOdds = settled.map(b => b.odds_taken).filter(Boolean);
+      const avgOdds = allOdds.length ? (allOdds.reduce((a,b)=>a+b,0)/allOdds.length).toFixed(2) : '—';
+
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('bb-bank', bank > 0 ? '£' + bank.toFixed(2) : '£—');
+      const pnlEl = document.getElementById('bb-pnl');
+      if (pnlEl) { pnlEl.textContent = (pnl >= 0 ? '+' : '') + '£' + Math.abs(pnl).toFixed(0); pnlEl.style.color = pnl >= 0 ? 'var(--accent)' : 'var(--red)'; }
+      set('bb-open', open);
+      set('bb-wr', settled.length ? Math.round(wins/settled.length*100) + '%' : '—');
+      set('bb-odds', avgOdds);
+    } catch(e) {
+      // API offline — just show bank
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('bb-bank', JB.bank > 0 ? '£' + JB.bank.toFixed(2) : '£—');
+    }
   }
 
   // ── BANK MODAL ─────────────────────────────────────────────────────────
@@ -1643,59 +1654,19 @@
     setTimeout(() => t.remove(), 3000);
   }
 
-  // ── BET LOG ────────────────────────────────────────────────────────────
-  function renderBetLog() {
-    const tbody = document.getElementById('betlog-tbody');
-    const pill = document.getElementById('betlog-bank-pill');
-    if (!tbody) return;
-    if (pill) pill.textContent = JB.bets.length + ' bets';
-
-    if (!JB.bets.length) {
-      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:32px;font-size:12px">No bets logged yet. Confirm a paper bet from the Dashboard to populate this log.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = JB.bets.map((b, i) => {
-      const resultOpts = ['PENDING','WIN','LOSS','VOID'].map(r => `<option${b.result===r?' selected':''}>${r}</option>`).join('');
-      const pnl = b.pnlUnits !== null ? (b.pnlUnits >= 0 ? '+' : '') + b.pnlUnits.toFixed(2) + 'u' : '—';
-      const pnlClass = b.pnlUnits > 0 ? 'edge-high' : b.pnlUnits < 0 ? 'red' : '';
-      return `<tr>
-        <td class="mono" style="color:var(--muted)">${JB.bets.length - i}</td>
-        <td class="mono" style="color:var(--muted);font-size:11px">${b.date}</td>
-        <td><span class="sport-tag tag-${b.sport}">${b.sport.toUpperCase()}</span></td>
-        <td class="mono" style="font-size:11px">${b.match}</td>
-        <td style="font-size:11px">${b.market} ${b.direction}</td>
-        <td class="mono edge-high">+${b.edge}%</td>
-        <td class="mono">${b.odds ? b.odds.toFixed(2) : '—'}</td>
-        <td class="mono">${b.kellyPct ? b.kellyPct + '%' : '—'}</td>
-        <td class="mono yellow">${b.stakeGBP ? '£' + b.stakeGBP.toFixed(2) : '—'}</td>
-        <td><span class="status-pill pill-blue" style="font-size:8px">PAPER</span></td>
-        <td>
-          <select style="background:var(--bg);border:1px solid var(--border-bright);border-radius:3px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:10px;padding:3px 6px;cursor:pointer"
-            onchange="setBetResult(${b.id}, this.value)">${resultOpts}</select>
-        </td>
-        <td class="mono ${pnlClass}">${pnl}</td>
-      </tr>`;
-    }).join('');
-  }
-
-  function setBetResult(id, result) {
-    const bet = JB.bets.find(b => b.id === id);
-    if (!bet) return;
-    bet.result = result;
-    if (result === 'WIN')  bet.pnlUnits = +((bet.kellyPct/100) * (bet.odds - 1) * 100).toFixed(2);
-    else if (result === 'LOSS') bet.pnlUnits = -(+(bet.kellyPct).toFixed(2));
-    else bet.pnlUnits = null;
-    localStorage.setItem('jb_bets', JSON.stringify(JB.bets));
-    renderBetLog();
-    updateBankBar();
-  }
-
-  function exportBetLog() {
-    if (!JB.bets.length) { alert('No bets to export'); return; }
-    const hdr = ['#','Date','Sport','Match','Market','Direction','Edge','Odds','Kelly%','StakeGBP','Mode','Result','PnL_units'];
-    const rows = JB.bets.map((b,i) => [JB.bets.length-i, b.date, b.sport, b.match, b.market, b.direction, b.edge, b.odds, b.kellyPct, b.stakeGBP||'', b.mode, b.result, b.pnlUnits||'']);
-    const csv = [hdr,...rows].map(r=>r.join(',')).join('\n');
+  async function exportBetLog() {
+    const r = await fetch(`${API_BASE}/api/ledger?limit=500`);
+    const d = await r.json();
+    const rows = d.rows || [];
+    if (!rows.length) { alert('No bets to export'); return; }
+    const hdr = ['#','Date','Sport','Match','Bet','Edge%','Odds','StakeGBP','Mode','Status','PnL_GBP'];
+    const csv_rows = rows.map((b,i) => [
+      rows.length-i, (b.placed_at||'').slice(0,10), b.sport||'', b.match_id||'',
+      b.bet_direction||'',
+      b.edge != null ? (b.edge*100).toFixed(1) : '',
+      b.odds_taken||'', b.stake_gbp||'', b.mode||'', b.status||'', b.profit_loss_gbp||''
+    ]);
+    const csv = [hdr,...csv_rows].map(r=>r.join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
     a.download = 'jb006_betlog.csv'; a.click();
@@ -1957,40 +1928,52 @@ function setPeriod(period, btn) {
   renderPerformance(period);
 }
 
-// ── renderPerformance — 100% from JB.bets localStorage ────────────────
-function renderPerformance(period) {
+// ── renderPerformance — reads /api/ledger ──────────────────────────────
+async function renderPerformance(period) {
   const titles = { day:"Today's Bets", week:"This Week's Bets", month:"This Month's Bets", ytd:"Year to Date", all:"All Time" };
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
-  const startOfWeek  = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay());  startOfWeek.setHours(0,0,0,0);
+  const startOfWeek  = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0,0,0,0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfYear  = new Date(now.getFullYear(), 0, 1);
 
-  let bets = JB.bets;
-  if (period === 'day')   bets = JB.bets.filter(b => b.date === todayStr);
-  else if (period === 'week')  bets = JB.bets.filter(b => new Date(b.date) >= startOfWeek);
-  else if (period === 'month') bets = JB.bets.filter(b => new Date(b.date) >= startOfMonth);
-  else if (period === 'ytd')   bets = JB.bets.filter(b => new Date(b.date) >= startOfYear);
+  let allBets = [];
+  try {
+    const r = await fetch(`${API_BASE}/api/ledger?limit=500`);
+    const d = await r.json();
+    allBets = d.rows || [];
+  } catch(e) { /* API offline — show empty state */ }
 
-  const settled = bets.filter(b => b.result !== 'PENDING');
-  const wins    = settled.filter(b => b.result === 'WIN').length;
-  const losses  = settled.filter(b => b.result === 'LOSS').length;
-  const pnl     = settled.reduce((s, b) => s + (b.pnlUnits || 0), 0);
-  const staked  = bets.reduce((s, b) => s + (b.stakeGBP || 0), 0);
+  // Convert placed_at to date string for period filtering
+  const toDate = row => (row.placed_at || '').slice(0, 10);
+
+  let bets = allBets;
+  if (period === 'day')   bets = allBets.filter(b => toDate(b) === todayStr);
+  else if (period === 'week')  bets = allBets.filter(b => new Date(toDate(b)) >= startOfWeek);
+  else if (period === 'month') bets = allBets.filter(b => new Date(toDate(b)) >= startOfMonth);
+  else if (period === 'ytd')   bets = allBets.filter(b => new Date(toDate(b)) >= startOfYear);
+
+  // Map API field names: status WON/LOST/VOID/PENDING, profit_loss_gbp, stake_gbp, odds_taken
+  const settled = bets.filter(b => b.status !== 'PENDING');
+  const wins    = settled.filter(b => b.status === 'WON').length;
+  const losses  = settled.filter(b => b.status === 'LOST').length;
+  const pnl     = settled.reduce((s, b) => s + (b.profit_loss_gbp || 0), 0);
+  const staked  = bets.reduce((s, b) => s + (b.stake_gbp || 0), 0);
   const roi     = staked > 0 ? (pnl / staked * 100) : 0;
   const winRate = settled.length ? Math.round(wins / settled.length * 100) : 0;
-  const bank    = JB.bank || 0;
+  const bank    = JB.bank + pnl;
+
   const perfBankEl = document.getElementById('perf-bankroll');
   if (perfBankEl) {
-    perfBankEl.textContent = bank > 0 ? 'Bank: £' + bank.toFixed(0) : 'Bank: £—';
-    perfBankEl.className = bank > 0 ? 'status-pill pill-green' : 'status-pill pill-paper';
+    perfBankEl.textContent = 'Bank: £' + bank.toFixed(0);
+    perfBankEl.className = bank >= JB.bank ? 'status-pill pill-green' : 'status-pill pill-orange';
     perfBankEl.style.cssText = 'font-size:11px; padding:5px 12px';
   }
 
   document.getElementById('perf-cards').innerHTML = `
     <div class="card ${pnl >= 0 ? 'card-accent' : 'card-red'}">
-      <div class="card-label">P&amp;L (units)</div>
-      <div class="card-value" style="color:${pnl>=0?'var(--accent)':'var(--red)'}">${pnl>=0?'+':''}${pnl.toFixed(1)}u</div>
+      <div class="card-label">P&amp;L</div>
+      <div class="card-value" style="color:${pnl>=0?'var(--accent)':'var(--red)'}">${pnl>=0?'+':''}£${Math.abs(pnl).toFixed(0)}</div>
       <div class="card-sub">${settled.length} settled bets</div>
     </div>
     <div class="card">
@@ -2005,8 +1988,8 @@ function renderPerformance(period) {
     </div>
     <div class="card">
       <div class="card-label">Bank</div>
-      <div class="card-value" style="color:${bank>0?'var(--accent)':'var(--muted)'}">${bank>0?'£'+bank.toFixed(0):'—'}</div>
-      <div class="card-sub">paper bankroll</div>
+      <div class="card-value" style="color:${bank>0?'var(--accent)':'var(--muted)'}">£${bank.toFixed(0)}</div>
+      <div class="card-sub">£${staked.toFixed(0)} staked</div>
     </div>
     <div class="card">
       <div class="card-label">Mode</div>
@@ -2014,13 +1997,13 @@ function renderPerformance(period) {
       <div class="card-sub">no real orders</div>
     </div>`;
 
-  // Balance curve
+  // Balance curve (indexed by bet)
   const canvas = document.getElementById('balance-chart');
   if (canvas) {
     const sorted = [...bets].reverse();
-    const curve  = [100];
-    sorted.forEach(b => curve.push(curve[curve.length - 1] + (b.pnlUnits || 0)));
-    drawBalanceChart(canvas, curve, ['start', ...sorted.map(b => b.date || '')]);
+    const curve  = [JB.bank];
+    sorted.forEach(b => curve.push(curve[curve.length - 1] + (b.profit_loss_gbp || 0)));
+    drawBalanceChart(canvas, curve, ['start', ...sorted.map(b => toDate(b))]);
   }
 
   // W/L by sport
@@ -2028,8 +2011,8 @@ function renderPerformance(period) {
   if (wlContainer) {
     const wlData = ['tennis','darts','snooker'].map(sp => ({
       label: sp.charAt(0).toUpperCase() + sp.slice(1),
-      wins:   bets.filter(b => b.sport === sp && b.result === 'WIN').length,
-      losses: bets.filter(b => b.sport === sp && b.result === 'LOSS').length,
+      wins:   bets.filter(b => b.sport === sp && b.status === 'WON').length,
+      losses: bets.filter(b => b.sport === sp && b.status === 'LOST').length,
     })).filter(r => r.wins + r.losses > 0);
     if (!wlData.length) {
       wlContainer.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:8px">No settled bets yet</div>';
@@ -2046,13 +2029,13 @@ function renderPerformance(period) {
     }
   }
 
-  // ROI by sport (from all JB.bets regardless of period filter)
+  // ROI by sport (all bets regardless of period filter)
   const roiContainer = document.getElementById('sport-roi-bars');
   if (roiContainer) {
     const roiData = ['tennis','darts','snooker'].map(sp => {
-      const spB = JB.bets.filter(b => b.sport === sp);
-      const spP = spB.reduce((s, b) => s + (b.pnlUnits || 0), 0);
-      const spS = spB.filter(b => b.result !== 'PENDING').reduce((s, b) => s + (b.stakeGBP || 0), 0);
+      const spB = allBets.filter(b => b.sport === sp);
+      const spP = spB.reduce((s, b) => s + (b.profit_loss_gbp || 0), 0);
+      const spS = spB.filter(b => b.status !== 'PENDING').reduce((s, b) => s + (b.stake_gbp || 0), 0);
       return { sport: sp.charAt(0).toUpperCase() + sp.slice(1), roi: spS > 0 ? spP/spS*100 : 0, bets: spB.length };
     });
     const maxROI = Math.max(...roiData.map(s => Math.abs(s.roi)), 1);
@@ -2077,26 +2060,30 @@ function renderPerformance(period) {
     if (!bets.length) {
       tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">No paper bets yet — log bets from the Dashboard Sniper Board</td></tr>';
     } else {
-      let running = 0;
+      let running = JB.bank;
       tbody.innerHTML = [...bets].reverse().map(b => {
-        running += b.pnlUnits || 0;
+        running += b.profit_loss_gbp || 0;
         const tagCls = 'tag-' + (b.sport || 'tennis');
-        const resultEl = b.result === 'WIN'
+        const resultEl = b.status === 'WON'
           ? `<span class="status-pill pill-green">WIN</span>`
-          : b.result === 'LOSS'
+          : b.status === 'LOST'
           ? `<span class="status-pill" style="background:rgba(255,68,102,0.1);color:var(--red);border:1px solid rgba(255,68,102,0.2)">LOSS</span>`
-          : `<span class="status-pill pill-paper">${b.result}</span>`;
+          : `<span class="status-pill pill-paper">${b.status}</span>`;
+        const pnlVal = b.profit_loss_gbp;
+        const matchLabel = (b.match_id || '').startsWith('BF:')
+          ? b.match_id.slice(3).replace(/_/g, ' ')
+          : b.match_id || '—';
         return `<tr>
-          <td class="mono" style="color:var(--muted)">${b.date}</td>
+          <td class="mono" style="color:var(--muted)">${toDate(b)}</td>
           <td><span class="sport-tag ${tagCls}">${(b.sport||'').toUpperCase()}</span></td>
-          <td class="mono">${b.match}</td>
-          <td>${b.market} ${b.direction}</td>
-          <td class="mono">${b.odds ? b.odds.toFixed(2) : '—'}</td>
-          <td class="mono yellow">${b.stakeGBP ? '£' + b.stakeGBP.toFixed(0) : '—'}</td>
+          <td class="mono">${matchLabel}</td>
+          <td>${b.bet_direction || '—'}</td>
+          <td class="mono">${b.odds_taken ? b.odds_taken.toFixed(2) : '—'}</td>
+          <td class="mono yellow">${b.stake_gbp ? '£' + b.stake_gbp.toFixed(0) : '—'}</td>
           <td><span class="status-pill pill-blue" style="font-size:9px">PAPER</span></td>
           <td>${resultEl}</td>
-          <td class="mono ${b.pnlUnits > 0 ? 'edge-high' : b.pnlUnits < 0 ? 'red' : ''}">${b.pnlUnits != null ? (b.pnlUnits >= 0 ? '+' : '') + b.pnlUnits.toFixed(2) + 'u' : '—'}</td>
-          <td class="mono ${running >= 0 ? 'edge-high' : 'red'}">${running >= 0 ? '+' : ''}${running.toFixed(2)}u</td>
+          <td class="mono ${pnlVal > 0 ? 'edge-high' : pnlVal < 0 ? 'red' : ''}">${pnlVal != null ? (pnlVal >= 0 ? '+' : '') + '£' + Math.abs(pnlVal).toFixed(0) : '—'}</td>
+          <td class="mono ${running >= JB.bank ? 'edge-high' : 'red'}">£${running.toFixed(0)}</td>
         </tr>`;
       }).join('');
     }
@@ -2464,7 +2451,7 @@ async function loadLedger() {
         <td>${sportTag(sport)}</td>
         <td class="mono" style="font-size:11px">${match}</td>
         <td>${betLabel}</td>
-        <td class="mono ${edgeClass(0.09)}">—</td>
+        <td class="mono ${edgeClass(row.edge || 0)}">${row.edge != null ? '+' + (row.edge * 100).toFixed(1) + '%' : '—'}</td>
         <td class="mono">£${(row.stake_gbp || 0).toFixed(0)}</td>
         <td class="mono">${(row.odds_taken || 0).toFixed(2)}</td>
         <td><span class="status-pill pill-blue">Betfair</span></td>

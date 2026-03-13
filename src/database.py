@@ -256,6 +256,11 @@ def init_db(path: Path = DB_PATH) -> None:
             conn.execute("ALTER TABLE betfair_markets ADD COLUMN last_seen_at TEXT DEFAULT NULL")
             conn.execute("UPDATE betfair_markets SET last_seen_at = created_at WHERE last_seen_at IS NULL")
             conn.commit()
+        # Migration: add edge column to ledger if missing
+        lcols = [r[1] for r in conn.execute("PRAGMA table_info(ledger)").fetchall()]
+        if "edge" not in lcols:
+            conn.execute("ALTER TABLE ledger ADD COLUMN edge REAL DEFAULT NULL")
+            conn.commit()
     print(f"[database] Initialised: {path}")
 
 
