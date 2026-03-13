@@ -332,23 +332,62 @@ Dashboard "Auto-settle"  → immediate settle check on demand
 
 ---
 
+## Session 2026-03-13 — Bankroll + Direction-Aware ELO Confidence
+
+**Outcome:** Stakes dramatically increased via £10k bank and a direction-aware U-curve confidence model.
+
+### Problem diagnosed
+`elo_confidence()` was a monotonic ramp (0 at gap≤25, 1.0 at gap≥350) designed for match-winner prediction. For over/under markets this is backwards at small gaps: a close match (small ELO gap) is high confidence OVER because evenly matched players grind out more games. The old curve gave near-zero confidence to these signals even on a £10k bank.
+
+Combined effect: Alcaraz vs Medvedev (gap=48, edge=12.8%) → old stake £11. New stake £500.
+
+### Changes
+
+**`src/model/edge.py`**
+- `elo_confidence(gap)` → `elo_confidence(gap, direction="NONE")` — direction-aware U-curve:
+  - `OVER`: 1.0 at gap≤50, linear fade to floor 0.2 at gap≥200 (close match = more games = confident)
+  - `UNDER`: floor 0.2 at gap≤50, linear rise to 1.0 at gap≥250 (blowout = fewer games = confident)
+  - `NONE / HOME / AWAY`: flat 0.2
+- `recommended_stake()` — added `direction` param, passed to `elo_confidence`
+- All 4 `recommended_stake()` call sites updated to pass `direction` (already in scope at each)
+
+**`src/api/server.py`**
+- `/api/analyse` inline `elo_confidence(abs_gap)` → `elo_confidence(abs_gap, direction)`
+- Bankroll default: 1000 → 10000
+
+**`dashboard/betting-dashboard.html`**
+- `JB.bank` default: 1000 → 10000
+- JS `eloConfidence()` updated to match Python U-curve (direction-aware, FLOOR=0.2)
+
+### U-curve at a glance
+```
+gap= 25  OVER=1.00  UNDER=0.20  NONE=0.20
+gap= 50  OVER=1.00  UNDER=0.20  NONE=0.20
+gap=100  OVER=0.73  UNDER=0.40  NONE=0.20
+gap=150  OVER=0.47  UNDER=0.60  NONE=0.20
+gap=200  OVER=0.20  UNDER=0.80  NONE=0.20
+gap=250  OVER=0.20  UNDER=1.00  NONE=0.20
+```
+
+### Known ceiling
+`MAX_STAKE_GBP = £500` (governor.py) is now the binding constraint on most high-confidence signals (tiered cap on £10k bank = £800–£2,200 but absolute ceiling cuts to £500). Appropriate for paper testing. Revisit before going live.
+
+---
+
 ## Next Session Priorities
 
-### P1 — Load 2025 Sackmann data (HIGH)
-DB is 15 months stale. `screen_from_db()` returns 0 signals without 2026 data.
+### P3 — Stale player filter (LOWER)
+In `screen_from_betfair_markets()`, look up player_form last match date after ELO lookup and reject if > 30 days stale.
+
+### P4 — Load Sackmann 2025 data (when available)
+Check monthly: https://github.com/JeffSackmann/tennis_atp for `atp_matches_2025.csv`
 ```
-Edit src/model/elo_warmup.py: extend year range 2019-2023 → 2019-2025
-PYTHONUTF8=1 python src/model/elo_warmup.py
-PYTHONUTF8=1 python src/scrapers/tennis/sackmann.py
-PYTHONUTF8=1 python src/model/elo_loader.py
+PYTHONUTF8=1 python -c "from src.scrapers.tennis.sackmann import SackmannScraper; s=SackmannScraper(); s.load_year(2025,'ATP'); s.load_year(2025,'WTA')"
+PYTHONUTF8=1 python -c "from src.model.elo_warmup import run_warmup; run_warmup()"
+PYTHONUTF8=1 python -c "from src.model.elo_loader import run; run(warm_start=True)"
 PYTHONUTF8=1 python src/model/form_builder.py
+# Then restore MIN_ELO_GAP to 50 in src/model/edge.py
 ```
 
-### P2 — Performance tab rewire (MEDIUM)
-`renderPerformance()` reads `JB.bets` (empty localStorage). Needs to call `GET /api/ledger` instead.
-Also fix ROI formula: currently `pnlUnits / stakeGBP` (wrong units) → should be `profit_loss_gbp / stake_gbp`.
-
-### P3 — Stale filter in live screener (do AFTER P1)
-Both `p1_last_match` / `p2_last_match` passed as `None` → stale 30-day filter bypassed.
-Fix: look up player_form for last match date after ELO lookup.
-**Note:** do NOT fix before P1 — will block all signals while DB is stale.
+### P5 — Live betting gate (FUTURE)
+30 days paper P&L ≥ 0 required before enabling LIVE mode.

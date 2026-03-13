@@ -1454,7 +1454,7 @@
 <script>
   // ── STATE ──────────────────────────────────────────────────────────────
   const JB = {
-    bank: parseFloat(localStorage.getItem('jb_bank') || '1000'),
+    bank: parseFloat(localStorage.getItem('jb_bank') || '10000'),
     bets: JSON.parse(localStorage.getItem('jb_bets') || '[]'),
     MIN_ODDS: 1.60,
   };
@@ -1468,10 +1468,19 @@
   // ── KELLY MATH — mirrors Python backend exactly ────────────────────────
   // stake = bankroll × (edge/b) × 0.25 × tier_mult × elo_confidence
   // Values pre-computed by /api/signals; dashboard uses them directly.
-  function eloConfidence(gap) {
-    if (gap < 50)  return 0.0;
-    if (gap > 350) return 1.0;
-    return (gap - 50) / 300;
+  function eloConfidence(gap, direction = "NONE") {
+    const FLOOR = 0.2;
+    if (direction === "OVER") {
+      if (gap <= 50)  return 1.0;
+      if (gap >= 200) return FLOOR;
+      return 1.0 - (1.0 - FLOOR) * (gap - 50) / 150;
+    }
+    if (direction === "UNDER") {
+      if (gap <= 50)  return FLOOR;
+      if (gap >= 250) return 1.0;
+      return FLOOR + (1.0 - FLOOR) * (gap - 50) / 200;
+    }
+    return FLOOR; // HOME / AWAY / NONE
   }
   function tierMult(tier) {
     return tier === 1 ? 1.00 : tier === 2 ? 0.70 : 0.40;

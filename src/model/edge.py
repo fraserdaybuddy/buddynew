@@ -84,17 +84,31 @@ class BetSignal:
 
 # ── Kelly calculation ──────────────────────────────────────────────────────────
 
-def elo_confidence(abs_elo_gap: float) -> float:
+def elo_confidence(abs_elo_gap: float, direction: str = "NONE") -> float:
     """
-    Scale factor in [0, 1] based on ELO gap magnitude.
-    At gap = MIN_ELO_GAP (50): 0.0   At gap = 350+: 1.0
+    Direction-aware confidence scale factor in [0.2, 1.0].
+
+    Over/under markets have opposite confidence profiles:
+      OVER  — close match (small gap) → both players grind → more games → high confidence
+              fades to floor as gap grows (dominant player closes faster)
+      UNDER — blowout (large gap) → dominant player closes fast → high confidence
+              at floor for close matches where UNDER is risky
+      NONE / HOME / AWAY / unknown — flat low confidence (0.2)
+
+    Thresholds:
+      OVER:  1.0 at gap ≤ 50  →  0.2 at gap ≥ 200  (linear)
+      UNDER: 0.2 at gap ≤ 50  →  1.0 at gap ≥ 250  (linear)
     """
-    lo, hi = MIN_ELO_GAP, 350.0
-    if abs_elo_gap <= lo:
-        return 0.0
-    if abs_elo_gap >= hi:
-        return 1.0
-    return (abs_elo_gap - lo) / (hi - lo)
+    FLOOR = 0.2
+    if direction == "OVER":
+        if abs_elo_gap <= 50:  return 1.0
+        if abs_elo_gap >= 200: return FLOOR
+        return 1.0 - (1.0 - FLOOR) * (abs_elo_gap - 50) / 150.0
+    if direction == "UNDER":
+        if abs_elo_gap <= 50:  return FLOOR
+        if abs_elo_gap >= 250: return 1.0
+        return FLOOR + (1.0 - FLOOR) * (abs_elo_gap - 50) / 200.0
+    return FLOOR  # HOME / AWAY / NONE
 
 
 def recommended_stake(
@@ -103,21 +117,22 @@ def recommended_stake(
     bankroll: float,
     tier: int,
     abs_elo_gap: float,
+    direction: str = "NONE",
 ) -> tuple:
     """
     Returns (fraction_used, stake_gbp) via governor.kelly_stake().
 
     Full Kelly with confidence scaling and tiered cap:
-      fraction = tier_mult × elo_confidence  (KELLY_FRACTION=1.0, full Kelly base)
+      fraction = tier_mult × elo_confidence(gap, direction)
       tier_mult      — data quality: T1=1.0  T2=0.70  T3=0.40
-      elo_confidence — ELO separation: 0.0 at gap=50 → 1.0 at gap=350+
+      elo_confidence — U-curve: OVER peaks at small gaps, UNDER peaks at large gaps
 
     Governor applies tiered bankroll % cap (8–22% depending on edge)
     and absolute £500 ceiling. Floored at £5.
     """
     from src.execution.governor import kelly_stake, KELLY_FRACTION
     tier_mult = TIER_MULT.get(tier, 0.40)
-    elo_conf  = elo_confidence(abs_elo_gap)
+    elo_conf  = elo_confidence(abs_elo_gap, direction)
     fraction  = KELLY_FRACTION * tier_mult * elo_conf
     stake     = kelly_stake(bankroll, edge, decimal_odds, fraction=fraction)
     return (fraction, stake)
@@ -417,7 +432,7 @@ def screen_tennis_match(
         ("UNDER", p_under_g, mkt_p_under_g, edge_under_g, under_odds_g),
     ]:
         if edge >= min_edge and not is_synth_g:
-            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap, direction)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="total_games",
                 direction=direction, line=line_g,
@@ -451,7 +466,7 @@ def screen_tennis_match(
         ("UNDER", p_under_s, mkt_p_under_s, edge_under_s, under_odds_s),
     ]:
         if edge >= min_edge and not is_synth_s:
-            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap, direction)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="total_sets",
                 direction=direction, line=line_s,
@@ -490,7 +505,7 @@ def screen_tennis_match(
         ("AWAY", 1-p_set_p1,     mkt_p2_fs, edge_p2, p2_odds),
     ]:
         if edge >= min_edge and not is_synth_fs:
-            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap)
+            fraction, stake = recommended_stake(edge, odds, bankroll, tier, abs_gap, direction)
             signals.append(BetSignal(
                 match_id=match_id, sport="tennis", market_type="first_set",
                 direction=player, line=0,
@@ -954,7 +969,7 @@ def screen_from_betfair_markets(
                 if abs(edge_val) < 0.001:
                     continue
 
-                fraction, stake = recommended_stake(edge_val, odds, bankroll, tier, abs_gap) \
+                fraction, stake = recommended_stake(edge_val, odds, bankroll, tier, abs_gap, direction) \
                     if edge_val >= MIN_EDGE else (0.0, 0.0)
 
                 # ELO gap filter

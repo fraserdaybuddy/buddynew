@@ -178,14 +178,14 @@ def signals():
     """
     Run edge screener for a given date.
     ?date=YYYY-MM-DD  (default: today)
-    ?bankroll=1000
+    ?bankroll=10000
     ?mode=PAPER
     ?sport=tennis
 
     Returns both qualifying bets and synthetic previews (when no real market lines).
     """
     match_date = request.args.get("date", str(date_type.today()))
-    bankroll   = float(request.args.get("bankroll", 1000.0))
+    bankroll   = float(request.args.get("bankroll", 10000.0))
     mode       = request.args.get("mode", "PAPER")
     sport      = request.args.get("sport", "tennis")
 
@@ -474,7 +474,7 @@ def analyse():
     book_line = float(body.get("book_line", 22.5))
     book_odds = float(body.get("book_odds", 1.88))
     direction = body.get("direction", "UNDER").upper()
-    bankroll  = float(body.get("bankroll", 1000.0))
+    bankroll  = float(body.get("bankroll", 10000.0))
 
     if not p1_query or not p2_query:
         return jsonify({"error": "p1 and p2 are required"}), 400
@@ -579,7 +579,7 @@ def analyse():
         # Kelly stake — use governor for consistent formula
         from src.execution.governor import kelly_stake, KELLY_FRACTION
         tier = 1  # assume T1 for manual analysis
-        elo_conf   = elo_confidence(abs_gap)
+        elo_conf   = elo_confidence(abs_gap, direction)
         tier_mult  = TIER_MULT[tier]
         fraction   = KELLY_FRACTION * tier_mult * elo_conf
         kelly_frac = fraction
