@@ -421,14 +421,16 @@ def poll_sport(
                         INSERT INTO betfair_markets
                             (market_id, match_id, sport, market_type, line,
                              over_odds, under_odds, total_matched,
-                             event_name, competition_name, data_source, verified)
-                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'betfair_api_live', 0)
+                             event_name, competition_name, data_source, verified,
+                             last_seen_at)
+                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'betfair_api_live', 0, datetime('now'))
                         ON CONFLICT(market_id) DO UPDATE SET
                             over_odds        = excluded.over_odds,
                             under_odds       = excluded.under_odds,
                             total_matched    = excluded.total_matched,
                             event_name       = excluded.event_name,
-                            competition_name = excluded.competition_name
+                            competition_name = excluded.competition_name,
+                            last_seen_at     = datetime('now')
                     """, (row_key, sport, internal_type, hcap,
                           over_odds, under_odds, matched, event_name, competition_name))
 

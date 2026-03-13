@@ -791,6 +791,13 @@ def screen_from_betfair_markets(
     ev_col   = "event_name"       if "event_name"       in cols else "NULL"
     comp_col = "competition_name" if "competition_name" in cols else "NULL"
 
+    # Check if last_seen_at column exists (added in migration)
+    bm_cols = [r[1] for r in conn.execute("PRAGMA table_info(betfair_markets)").fetchall()]
+    recency_filter = (
+        "AND (last_seen_at > datetime('now', '-4 hours') OR last_seen_at IS NULL)"
+        if "last_seen_at" in bm_cols else ""
+    )
+
     rows = conn.execute(
         f"""SELECT {ev_col} as event_name, {comp_col} as competition_name,
                   market_type, line, over_odds, under_odds, total_matched
@@ -799,6 +806,7 @@ def screen_from_betfair_markets(
              AND over_odds IS NOT NULL
              AND under_odds IS NOT NULL
              AND (total_matched >= ? OR total_matched IS NULL)
+             {recency_filter}
            ORDER BY event_name, market_type, total_matched DESC""",
         (sport, min_liquidity)
     ).fetchall()

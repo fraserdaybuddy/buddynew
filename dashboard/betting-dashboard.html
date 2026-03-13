@@ -1454,7 +1454,7 @@
 <script>
   // ── STATE ──────────────────────────────────────────────────────────────
   const JB = {
-    bank: parseFloat(localStorage.getItem('jb_bank') || '0'),
+    bank: parseFloat(localStorage.getItem('jb_bank') || '1000'),
     bets: JSON.parse(localStorage.getItem('jb_bets') || '[]'),
     MIN_ODDS: 1.60,
   };
@@ -1610,7 +1610,7 @@
     const e = EDGES[_modalIdx];
     if (!e) return;
     const kPct = kellyFracFor(e);
-    const gbp = kellyGBPFor(e) || 0;
+    const gbp = kellyGBPFor(e) || e.stake_gbp || 0;
     closeBetModal();
     try {
       const r = await fetch(`${API_BASE}/api/ledger`, {
@@ -1750,16 +1750,22 @@
       set(0, 'Match',            `${d.p1.name} vs ${d.p2.name}`);
       set(1, 'Market',           `Total Games ${direction} ${bookLine}`);
       set(2, 'Model fair line',  `${d.simulation.fair_line_games} games`);
-      set(3, 'P1 ELO',           `${d.p1.elo} (${d.p1.matches || '?'} matches)`);
+      const eloDate = d.elo_as_of ? d.elo_as_of.slice(0, 10) : null;
+      const eloAge  = eloDate ? Math.round((Date.now() - new Date(eloDate).getTime()) / 86400000) : null;
+      const eloWarn = eloAge && eloAge > 30
+        ? ` <span style="color:var(--warn);font-size:9px">⚠ ${eloAge}d stale</span>` : '';
+      set(3, 'P1 ELO',           `${d.p1.elo} (${d.p1.matches || '?'} matches)${eloWarn}`);
       set(4, 'P2 ELO',           `${d.p2.elo} (${d.p2.matches || '?'} matches)`);
       set(5, 'ELO gap',          `${d.abs_elo_gap.toFixed(0)} pts`);
       set(6, 'Implied prob',     `${(d.market_p*100).toFixed(1)}% → model ${(d.model_p*100).toFixed(1)}%`);
       const recEl = panel.querySelector('.rec-text');
       const stakeStr = d.stake_gbp ? ` · stake £${d.stake_gbp.toFixed(0)}` : '';
+      const staleWarn = eloAge && eloAge > 30
+        ? `<br><span style="font-size:10px;color:var(--warn)">⚠ ELO data is ${eloAge} days old (last: ${eloDate}) — run P1 Sackmann update</span>` : '';
       if (d.qualifies) {
-        recEl.innerHTML = `<strong>BET ${direction} ${bookLine} TOTAL GAMES</strong><br>Edge ${edgePct} — Kelly ${(kFrac*100).toFixed(1)}%${stakeStr}<br><span style="font-size:10px;color:var(--muted)">Model p=${(d.model_p*100).toFixed(1)}% vs market ${(d.market_p*100).toFixed(1)}%</span>`;
+        recEl.innerHTML = `<strong>BET ${direction} ${bookLine} TOTAL GAMES</strong><br>Edge ${edgePct} — Kelly ${(kFrac*100).toFixed(1)}%${stakeStr}<br><span style="font-size:10px;color:var(--muted)">Model p=${(d.model_p*100).toFixed(1)}% vs market ${(d.market_p*100).toFixed(1)}%</span>${staleWarn}`;
       } else {
-        recEl.innerHTML = `<strong style="color:var(--warn)">NO BET</strong><br>${d.reject_reason || 'Below threshold'}<br><span style="font-size:10px;color:var(--muted)">Fair line ${d.simulation.fair_line_games} vs book ${bookLine}</span>`;
+        recEl.innerHTML = `<strong style="color:var(--warn)">NO BET</strong><br>${d.reject_reason || 'Below threshold'}<br><span style="font-size:10px;color:var(--muted)">Fair line ${d.simulation.fair_line_games} vs book ${bookLine}</span>${staleWarn}`;
       }
     } catch(e) {
       edgeEl.textContent = 'API?'; edgeEl.style.color = 'var(--red)';

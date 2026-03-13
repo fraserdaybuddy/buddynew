@@ -540,6 +540,10 @@ def analyse():
     p1_data, p1_err = lookup_player(p1_query)
     p2_data, p2_err = lookup_player(p2_query)
 
+    elo_as_of = conn.execute(
+        "SELECT MAX(as_of_date) FROM player_form WHERE sport='tennis'"
+    ).fetchone()[0]
+
     conn.close()
 
     if p1_err:
@@ -596,6 +600,7 @@ def analyse():
                 "elo":       round(p2_elo, 1),
                 "matches":   p2_data.get("match_count"),
             },
+            "elo_as_of":   elo_as_of,
             "surface":     surface,
             "best_of":     best_of,
             "elo_gap":     round(elo_gap, 1),

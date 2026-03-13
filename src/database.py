@@ -250,6 +250,12 @@ def init_db(path: Path = DB_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(path) as conn:
         conn.executescript(SCHEMA)
+        # Migration: add last_seen_at to betfair_markets if missing
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(betfair_markets)").fetchall()]
+        if "last_seen_at" not in cols:
+            conn.execute("ALTER TABLE betfair_markets ADD COLUMN last_seen_at TEXT DEFAULT NULL")
+            conn.execute("UPDATE betfair_markets SET last_seen_at = created_at WHERE last_seen_at IS NULL")
+            conn.commit()
     print(f"[database] Initialised: {path}")
 
 
