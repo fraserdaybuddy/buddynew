@@ -144,7 +144,7 @@ def is_retired(score: str) -> bool:
 
 def run_warmup(years: list[int] = None, tours: list[str] = None) -> None:
     if years is None:
-        years = list(range(2019, 2024))  # 2019-2023 inclusive
+        years = list(range(2019, 2026))  # 2019-2025 inclusive
     if tours is None:
         tours = ["ATP", "WTA"]
 
@@ -243,7 +243,7 @@ if __name__ == "__main__":
                         help="Number of historical years to load (default: 5 → 2019-2023)")
     args = parser.parse_args()
 
-    current_year = 2024  # first year in matches table
+    current_year = 2025  # most recent year in Sackmann repo + 1
     start_year = current_year - args.years
     years = list(range(start_year, current_year))
 
