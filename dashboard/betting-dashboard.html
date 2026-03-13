@@ -1838,7 +1838,7 @@
         const key = (s.event_name || s.match_id) + '|' + s.market_type;
         if (!seen.has(key) || s.edge > seen.get(key).edge) seen.set(key, s);
       }
-      const qualifying = [...seen.values()].filter(s => !s.reject_reason && (!s.odds || s.odds >= JB.MIN_ODDS)).sort((a, b) => b.edge - a.edge).slice(0, 10);
+      const qualifying = [...seen.values()].filter(s => !s.reject_reason && s.stake_gbp > 0 && (!s.odds || s.odds >= JB.MIN_ODDS)).sort((a, b) => b.edge - a.edge).slice(0, 10);
 
       // Populate EDGES array for bet modal
       EDGES.length = 0;

@@ -51,7 +51,8 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "universe.db"
 
 TIER_MULT = {1: 1.00, 2: 0.70, 3: 0.40}
 MIN_EDGE = 0.05             # 5% minimum edge
-MIN_ELO_GAP = 50.0          # minimum ELO separation (Gate 4 validated)
+MIN_ELO_GAP = 25.0          # minimum ELO separation — lowered from 50 pending P1 Sackmann refresh
+                             # (Dec 2024 ELO stale; small gaps have auto-scaled low elo_confidence → tiny stakes)
 MIN_LIQUIDITY_GBP = 50.0    # minimum matched volume on Betfair
 STALE_DAYS = 30             # last match must be within 30 days
 MIN_SURFACE_MATCHES = 3     # minimum surface-specific matches for T1 treatment
